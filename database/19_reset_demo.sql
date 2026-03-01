@@ -88,11 +88,17 @@ BEGIN
   SELECT COUNT(*) INTO v_abs_count FROM absences;
 
   -- ── 3. Borrar en orden correcto (respetar FK) ──────────────
-  --   relief_requests referencia reservations → borrar primero
-  DELETE FROM relief_requests;
-  DELETE FROM absences;
-  DELETE FROM invitations;
-  DELETE FROM reservations;
+  --   DELETE … WHERE true borra todas las filas y supera la
+  --   restricción de Supabase que exige cláusula WHERE.
+  --   El orden respeta las claves foráneas:
+  --     relief_requests → referencia reservations e invitations
+  --     absences        → no referencia otras tablas operativas
+  --     invitations     → referencia reservations (slot_id)
+  --     reservations    → tabla principal
+  DELETE FROM relief_requests WHERE true;
+  DELETE FROM absences        WHERE true;
+  DELETE FROM invitations     WHERE true;
+  DELETE FROM reservations    WHERE true;
 
   -- ── 4. Retornar resumen del reset ─────────────────────────
   RETURN json_build_object(

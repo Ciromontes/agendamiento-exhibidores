@@ -137,6 +137,9 @@ export default function ExhibitorGrid() {
     { id: string; reservation_id: string; slot_id: string }[]
   >([])
   const [openReliefBySlot, setOpenReliefBySlot] = useState<Record<string, string>>({})
+  // coupleModal: cuando el usuario casado reserva un turno vacío, guardamos
+  // el slotId aquí y mostramos el modal para elegir si agrega al cónyuge
+  const [coupleModal, setCoupleModal] = useState<string | null>(null)
   const [reliefModal, setReliefModal] = useState<{
     reservationId: string; slotId: string; isUrgent: boolean
   } | null>(null)
@@ -637,15 +640,13 @@ export default function ExhibitorGrid() {
   /**
    * handleReserve - Reservar un turno (posición 1 o 2).
    *
-   * Lógica V4 (Fase 4 — Límites):
-   *   1. Verifica límite del período (semanal o mensual) del usuario
-   *   2. Determina qué posición usar (1 si vacío, 2 si hay uno)
-   *   3. Si el slot está vacío (0/2) y el usuario tiene cónyuge:
-   *      a. Reserva al usuario en pos 1
-   *      b. Si el cónyuge tiene cupo, reserva en pos 2 automáticamente
-   *   4. Si hay conflicto (23505), intenta la otra posición
+   * withSpouse (opcional):
+   *   undefined → si el slot está vacío y hay cónyuge disponible, muestra
+   *               el modal de elección antes de insertar nada.
+   *   true      → reservar usuario + cónyuge (confirmación del modal).
+   *   false     → reservar solo el usuario (confirmación del modal).
    */
-  const handleReserve = async (slotId: string) => {
+  const handleReserve = async (slotId: string, withSpouse?: boolean) => {
     if (!user) return
     setActionLoading(slotId)
 
@@ -710,6 +711,13 @@ export default function ExhibitorGrid() {
     const slotIsEmpty = slotRes.length === 0
     const position = slotIsEmpty ? 1 : 2
 
+    // Si el turno está vacío y hay cónyuge con cupo, preguntar antes de insertar
+    if (slotIsEmpty && spouse && spouseCanReserve && withSpouse === undefined) {
+      setCoupleModal(slotId)
+      setActionLoading(null)
+      return
+    }
+
     // Insertar reserva del usuario
     const { error } = await supabase.from('reservations').insert({
       time_slot_id: slotId,
@@ -744,12 +752,8 @@ export default function ExhibitorGrid() {
       }
     }
 
-    // ─── Fase 3: Auto-reservar cónyuge si el slot estaba vacío ───
-    // Solo se auto-reserva si:
-    //   1. El slot estaba vacío (0/2) antes de esta reserva
-    //   2. El usuario tiene cónyuge vinculado
-    //   3. El cónyuge aún tiene cupo en su límite del período
-    if (slotIsEmpty && spouse && spouseCanReserve) {
+    // ─── Fase 3: Reservar cónyuge si el usuario eligió hacerlo ───
+    if (slotIsEmpty && withSpouse === true && spouse) {
       const { error: spouseError } = await supabase.from('reservations').insert({
         time_slot_id: slotId,
         user_id: spouse.id,
@@ -1381,6 +1385,45 @@ export default function ExhibitorGrid() {
                 className="flex-1 py-2 text-sm rounded-xl bg-orange-500 text-white hover:bg-orange-600 disabled:opacity-40 transition font-medium"
               >
                 {reliefSending ? '...' : '✅ Enviar solicitud'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Modal elección: agendar solo o con cónyuge (Fase 3+) ─── */}
+      {coupleModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xs">
+            <div className="px-5 py-4 border-b flex items-center justify-between">
+              <h2 className="text-sm font-semibold text-gray-800">💑 ¿Cómo deseas agendar?</h2>
+              <button
+                onClick={() => setCoupleModal(null)}
+                className="text-gray-400 hover:text-gray-600 text-2xl leading-none"
+              >
+                ×
+              </button>
+            </div>
+            <div className="p-4 space-y-3">
+              <p className="text-xs text-gray-500">
+                Tu cónyuge <strong>{spouse?.name}</strong> tiene cupo disponible.
+                ¿Deseas reservar el turno para los dos?
+              </p>
+              {/* Opción: solo el usuario */}
+              <button
+                onClick={() => { const s = coupleModal; setCoupleModal(null); handleReserve(s, false) }}
+                className="w-full py-2.5 text-sm rounded-xl bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition text-left px-3"
+              >
+                <span className="font-medium">👤 Solo yo</span>
+                <p className="text-[11px] text-indigo-400 mt-0.5">{spouse?.name} puede agendar por separado si hay cupo.</p>
+              </button>
+              {/* Opción: ambos */}
+              <button
+                onClick={() => { const s = coupleModal; setCoupleModal(null); handleReserve(s, true) }}
+                className="w-full py-2.5 text-sm rounded-xl bg-pink-50 text-pink-700 hover:bg-pink-100 transition text-left px-3"
+              >
+                <span className="font-medium">💑 Agendar con {spouse?.name}</span>
+                <p className="text-[11px] text-pink-400 mt-0.5">Reservar los dos lugares del turno juntos automáticamente.</p>
               </button>
             </div>
           </div>
