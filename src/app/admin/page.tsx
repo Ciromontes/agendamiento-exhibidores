@@ -25,12 +25,13 @@ import AdminConfigPanel from '@/components/AdminConfigPanel'
 import AdminWeekReport from '@/components/AdminWeekReport'
 import AdminAbsencePanel from '@/components/AdminAbsencePanel'
 import AdminExhibitorManager from '@/components/AdminExhibitorManager'
+import AdminResetPanel from '@/components/AdminResetPanel'
 
 export default function AdminPage() {
   const { user, isLoading, logout } = useUser()
   const router = useRouter()
   // Pestaña activa: 'horarios', 'usuarios' o 'config'
-  const [activeTab, setActiveTab] = useState<'horarios' | 'usuarios' | 'config' | 'reporte' | 'ausentes' | 'exhibidores'>('horarios')
+  const [activeTab, setActiveTab] = useState<'horarios' | 'usuarios' | 'config' | 'reporte' | 'ausentes' | 'exhibidores' | 'reset'>('horarios')
 
   // Protección de ruta: solo admins pueden ver esta página
   useEffect(() => {
@@ -140,6 +141,17 @@ export default function AdminPage() {
           >
             🚫 Ausentes
           </button>
+          {/* Pestaña: Reset de demo — solo para administradores */}
+          <button
+            onClick={() => setActiveTab('reset')}
+            className={`px-5 py-2 rounded-lg text-sm font-medium transition-all ${
+              activeTab === 'reset'
+                ? 'bg-red-600 text-white shadow-sm'
+                : 'text-red-400 hover:text-red-600'
+            }`}
+          >
+            🗑️ Reset Demo
+          </button>
         </div>
       </div>
 
@@ -157,6 +169,8 @@ export default function AdminPage() {
         {activeTab === 'reporte' && <AdminWeekReport />}
         {/* Pestaña de ausencias (Fase 9B) */}
         {activeTab === 'ausentes' && <AdminAbsencePanel />}
+        {/* Pestaña de reset para demostración */}
+        {activeTab === 'reset' && <AdminResetPanel />}
       </main>
     </div>
   )
