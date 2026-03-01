@@ -18,7 +18,7 @@ import InvitationBadge from '@/components/InvitationBadge'
 import ReliefBadge from '@/components/ReliefBadge'
 import NotificationBell from '@/components/NotificationBell'
 import WeekHistoryPanel from '@/components/WeekHistoryPanel'
-import AbsenceToggle from '@/components/AbsenceToggle'
+import GlobalReliefButton from '@/components/GlobalReliefButton'
 import { USER_TYPE_LABELS } from '@/types'
 import { createClient } from '@/lib/supabase/client'
 
@@ -33,8 +33,6 @@ export default function DashboardPage() {
   const [view, setView] = useState<'main' | 'history'>('main')
   // Referencia al panel de notificaciones (Fase 9A) — permite hacer scroll directo
   const notifRef = useRef<HTMLDivElement>(null)
-  // Estado de ausencia (Fase 9B): bloquea la grilla del usuario
-  const [isAbsent, setIsAbsent] = useState(false)
 
   // Protección de ruta: redirigir al login si no hay usuario
   useEffect(() => {
@@ -132,9 +130,9 @@ export default function DashboardPage() {
               <InvitationBadge />
               <ReliefBadge />
             </div>
-            {/* Fase 9B: Toggle de ausencia semanal */}
-            <AbsenceToggle onAbsenceChange={setIsAbsent} />
-            <ExhibitorGrid isAbsent={isAbsent} />
+            {/* Fase 10: Botón global de relevo — reemplaza AbsenceToggle */}
+            <GlobalReliefButton />
+            <ExhibitorGrid />
           </>
         ) : (
           /* Historial de semanas pasadas + mis estadísticas (Fase 8) */

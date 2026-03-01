@@ -38,14 +38,7 @@ import {
   USER_TYPE_LABELS, formatTimeLabel, getMonthStart,
 } from '@/types'
 
-/**
- * Props de ExhibitorGrid
- * isAbsent: cuando es true (Fase 9B), se muestra un banner de advertencia
- *   y los botones de reserva quedan deshabilitados para ese usuario.
- */
-interface ExhibitorGridProps {
-  isAbsent?: boolean
-}
+// Sin props externas en esta fase
 
 /**
  * getWeekStart - Calcula la fecha del lunes de la semana actual.
@@ -82,7 +75,7 @@ function getSlotDatetime(weekStart: string, dayOfWeek: number, startTime: string
   return d
 }
 
-export default function ExhibitorGrid({ isAbsent = false }: ExhibitorGridProps) {
+export default function ExhibitorGrid() {
   // --- Estado del componente ---
   const [exhibitors, setExhibitors] = useState<Exhibitor[]>([])
   const [timeSlots, setTimeSlots] = useState<TimeSlot[]>([])
@@ -822,20 +815,7 @@ export default function ExhibitorGrid({ isAbsent = false }: ExhibitorGridProps) 
 
   return (
     <div>
-      {/* Banner de ausencia (Fase 9B): bloquea la grilla al usuario ausente */}
-      {isAbsent && (
-        <div className="mb-4 bg-red-50 border border-red-200 rounded-xl px-4 py-3 flex items-center gap-3">
-          <span className="text-xl">🚫</span>
-          <div>
-            <p className="text-sm font-semibold text-red-800">
-              Marcaste ausencia para esta semana
-            </p>
-            <p className="text-xs text-red-600">
-              No puedes reservar nuevos turnos. Para volver a reservar, quita tu ausencia desde el panel de arriba.
-            </p>
-          </div>
-        </div>
-      )}
+
       {/* Barra informativa: turnos usados, tipo de usuario, cónyuge y leyenda */}
       <div className="mb-4 bg-indigo-50 rounded-xl px-4 py-3 flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-3 flex-wrap">
@@ -1002,19 +982,15 @@ export default function ExhibitorGrid({ isAbsent = false }: ExhibitorGridProps) 
                       <td key={dayNum} className="px-2 py-2 text-center">
                         <button
                           onClick={() => handleReserve(slot.id)}
-                          disabled={!canReserve || actionLoading === slot.id || isAbsent}
+                          disabled={!canReserve || actionLoading === slot.id}
                           className={`w-full py-3 px-1 text-xs rounded-lg transition-all ${
-                            isAbsent
-                              ? 'bg-red-50 text-red-300 cursor-not-allowed'
-                              : canReserve
+                            canReserve
                               ? 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100 hover:shadow-sm cursor-pointer'
                               : 'bg-gray-50 text-gray-400 cursor-not-allowed'
                           }`}
                         >
                           {actionLoading === slot.id
                             ? '...'
-                            : isAbsent
-                            ? '🚫 Ausente'
                             : spouse && spouseCanReserve
                             ? '💑 Disponible'
                             : 'Disponible'}
