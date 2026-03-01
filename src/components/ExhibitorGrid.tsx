@@ -129,11 +129,14 @@ export default function ExhibitorGrid() {
   // ─── Estado de relevos (Fase 9A) ──────────────────────────
   // myPendingReliefs: relevos que YO solicité esta semana (pendientes)
   //   → permite mostrar '⏳ Relevo pendiente' en lugar de 'Cancelar'
+  // openReliefBySlot: relevos abiertos de OTROS usuarios en esta semana
+  //   → permite mostrar indicador visual en la grilla para compatibles
   // reliefModal: datos del modal de tipo de relevo (open/personal)
   // reliefType/reliefUsers/reliefPersonalId: selección dentro del modal
   const [myPendingReliefs, setMyPendingReliefs] = useState<
     { id: string; reservation_id: string; slot_id: string }[]
   >([])
+  const [openReliefBySlot, setOpenReliefBySlot] = useState<Record<string, string>>({})
   const [reliefModal, setReliefModal] = useState<{
     reservationId: string; slotId: string; isUrgent: boolean
   } | null>(null)
@@ -262,6 +265,24 @@ export default function ExhibitorGrid() {
       if (reliefData) setMyPendingReliefs(
         reliefData as { id: string; reservation_id: string; slot_id: string }[]
       )
+
+      // Relevos abiertos de otros usuarios esta semana, del mismo género
+      // → para mostrar indicador 🔄 en celdas de la grilla a usuarios compatibles
+      const { data: openRelData } = await supabase
+        .from('relief_requests')
+        .select('id, slot_id, from_user:users!relief_requests_from_user_id_fkey(gender)')
+        .neq('from_user_id', user.id)
+        .eq('week_start', weekStart)
+        .eq('status', 'pending')
+        .is('to_user_id', null)
+        .gt('expires_at', nowIso)
+      if (openRelData) {
+        const map: Record<string, string> = {}
+        for (const r of openRelData as unknown as { id: string; slot_id: string; from_user: { gender: string } | null }[]) {
+          if (r.from_user?.gender === user.gender) map[r.slot_id] = r.id
+        }
+        setOpenReliefBySlot(map)
+      }
     }
 
     setLoading(false)
@@ -1064,6 +1085,15 @@ export default function ExhibitorGrid() {
                                     </span>
                                   )
                                 }
+                                // Si el ocupante tiene relevo abierto, mostrar indicador
+                                // (la persona quiere ser reemplazada, no completar el turno)
+                                if (openReliefBySlot[slot.id]) {
+                                  return (
+                                    <span className="text-[10px] text-amber-600 font-medium">
+                                      🔄 Relevo disponible
+                                    </span>
+                                  )
+                                }
                                 return (
                                   <button
                                     onClick={() => handleReserve(slot.id)}
@@ -1089,6 +1119,8 @@ export default function ExhibitorGrid() {
                   }
 
                   // ── CELDA COMPLETA (2/2): Dos personas ──
+                  // Si hay relevo abierto compatible, el borde cambia a ámbar para destacarlo
+                  const hasOpenRelief = !hasOwnReservation && !!openReliefBySlot[slot.id]
                   return (
                     <td key={dayNum} className="px-2 py-2 text-center">
                       <div className={`rounded-lg px-2 py-1.5 text-xs transition-all ${
@@ -1096,6 +1128,8 @@ export default function ExhibitorGrid() {
                           ? 'bg-pink-50 text-pink-800 border border-pink-300'
                           : hasOwnReservation
                           ? 'bg-green-100 text-green-800 border border-green-300'
+                          : hasOpenRelief
+                          ? 'bg-amber-50 text-amber-800 border border-amber-300'
                           : 'bg-blue-50 text-blue-700 border border-blue-200'
                       }`}>
                         {/* Indicador de pareja si es turno de cónyuges (Fase 3) */}
@@ -1125,15 +1159,8 @@ export default function ExhibitorGrid() {
                           if (hasPendingRelief1) {
                             return <span className="text-[10px] text-amber-500 font-medium">⏳ Relevo pendiente</span>
                           }
-                          // Pasó la ventana → pedir relevo
-                          return (
-                            <button
-                              onClick={() => handleOpenReliefModal(pos1!)}
-                              className="text-amber-600 hover:text-amber-700 text-[10px] underline"
-                            >
-                              🔄 Pedir relevo
-                            </button>
-                          )
+                          // Pasó la ventana → usar botón global 'Pedir Relevo' en la parte superior
+                          return null
                         })()}
                         {/* Separador visual */}
                         <div className="border-t border-dashed my-0.5"></div>
@@ -1160,16 +1187,15 @@ export default function ExhibitorGrid() {
                           if (hasPendingRelief2) {
                             return <span className="text-[10px] text-amber-500 font-medium">⏳ Relevo pendiente</span>
                           }
-                          // Pasó la ventana → pedir relevo
-                          return (
-                            <button
-                              onClick={() => handleOpenReliefModal(pos2!)}
-                              className="text-amber-600 hover:text-amber-700 text-[10px] underline"
-                            >
-                              🔄 Pedir relevo
-                            </button>
-                          )
+                          // Pasó la ventana → usar botón global 'Pedir Relevo' en la parte superior
+                          return null
                         })()}
+                        {/* Indicador de relevo disponible para hermanos compatibles */}
+                        {!hasOwnReservation && openReliefBySlot[slot.id] && (
+                          <p className="text-[10px] text-amber-600 font-semibold mt-0.5">
+                            🔄 Relevo disponible
+                          </p>
+                        )}
                         {/* Indicador completo */}
                         <p className="text-[10px] text-green-600 font-bold mt-0.5">2/2 ✓</p>
                       </div>

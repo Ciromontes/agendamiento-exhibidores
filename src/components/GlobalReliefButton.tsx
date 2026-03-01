@@ -121,12 +121,10 @@ export default function GlobalReliefButton() {
 
   useEffect(() => { fetchData() }, [fetchData])
 
-  // ─── Abrir modal: preseleccionar reservas sin relevo pendiente ──
+  // ─── Abrir modal: sin preseleccion — el usuario elige manualmente ──
   const handleOpenModal = () => {
-    // Preseleccionar todas las que aún no tienen relevo
-    const initial = new Set(
-      reservations.filter(r => !r.hasPendingRelief).map(r => r.id)
-    )
+    // Sin preseleccion: el usuario marca las fechas que desea
+    const initial = new Set<string>()
     setSelected(initial)
     setStep('select')
     setSentCount(0)
