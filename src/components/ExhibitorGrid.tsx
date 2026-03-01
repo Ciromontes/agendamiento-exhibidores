@@ -1066,6 +1066,16 @@ export default function ExhibitorGrid() {
                                   ✉️ Invitar
                                 </button>
                               )
+                            ) : hasSpouseReservation && canReserve ? (
+                              // Mi cónyuge ya está en el turno: puedo unirme aunque tenga cupo lleno
+                              // (el matrimonio comparte turnos sin restricción de posición)
+                              <button
+                                onClick={() => handleReserve(slot.id)}
+                                disabled={actionLoading === slot.id}
+                                className="w-full py-1 text-[10px] rounded bg-pink-50 text-pink-700 hover:bg-pink-100 transition"
+                              >
+                                {actionLoading === slot.id ? '...' : '💑 Unirme a mi cónyuge'}
+                              </button>
                             ) : !hasSpouseReservation && canReserve ? (
                               // Alguien más tiene el turno: verificar compatibilidad de género
                               isCompatiblePartner(reservation!) ? (() => {
