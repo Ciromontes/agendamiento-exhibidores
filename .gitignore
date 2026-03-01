@@ -30,8 +30,14 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files — contienen claves de Supabase (NUNCA commitear)
 .env*
+
+# SQL sueltos en la raíz (no los scripts organizados en /database/)
+# *.sql  ← desactivado: /database/ contiene los scripts de migración del schema
+
+# Archivos de capacidad de carga y pruebas temporales
+/load-tests/results/
 
 # vercel
 .vercel
