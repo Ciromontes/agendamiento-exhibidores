@@ -38,6 +38,7 @@ type UserFormData = {
   user_type: 'publicador' | 'precursor_regular' | 'precursor_auxiliar'
   gender: 'M' | 'F' | null
   is_admin: boolean
+  phone: string   // Número de WhatsApp con código de país
 }
 
 /** Valores iniciales del formulario (vacío) */
@@ -47,6 +48,7 @@ const EMPTY_FORM: UserFormData = {
   user_type: 'publicador',
   gender: null,
   is_admin: false,
+  phone: '',
 }
 
 /** Filtro activo para la lista de usuarios */
@@ -90,7 +92,10 @@ export default function AdminUserManager() {
   const [spouseTargetUser, setSpouseTargetUser] = useState<User | null>(null) // Usuario al que vincular
   const [spouseSearch, setSpouseSearch] = useState('')        // Búsqueda en el modal de cónyuge
   const [savingSpouse, setSavingSpouse] = useState(false)     // Guardando vinculación
-
+  // ─── Claves generadas en esta sesión (ephemeral, solo en memoria) ────────
+  // Mapea userId → clave en texto plano recién generada.
+  // Se borra al recargar la página para no exponer claves.
+  const [generatedKeys, setGeneratedKeys] = useState<Map<string, string>>(new Map())
   // =============================================================
   // Cargar usuarios desde Supabase
   // =============================================================
@@ -211,6 +216,7 @@ export default function AdminUserManager() {
       user_type: user.user_type,
       gender: user.gender,
       is_admin: user.is_admin,
+      phone: user.phone ?? '',
     })
     setFormErrors([])
     setShowModal(true)
@@ -249,8 +255,7 @@ export default function AdminUserManager() {
           access_key: formData.access_key,
           user_type: formData.user_type,
           gender: formData.gender,
-          is_admin: formData.is_admin,
-        })
+          is_admin: formData.is_admin,          phone: formData.phone.replace(/\D/g, '') || null,        })
         .eq('id', editingUser.id)
 
       if (error) {
@@ -275,8 +280,7 @@ export default function AdminUserManager() {
           user_type: formData.user_type,
           gender: formData.gender,
           is_admin: formData.is_admin,
-          is_active: true,
-        })
+          is_active: true,          phone: formData.phone.replace(/\D/g, '') || null,        })
 
       if (error) {
         if (error.code === '23505') {
@@ -364,6 +368,71 @@ export default function AdminUserManager() {
     u.id !== spouseTargetUser?.id &&
     u.name.toLowerCase().includes(spouseSearch.toLowerCase())
   )
+
+  // =============================================================
+  // Generar clave segura + envío por WhatsApp
+  // =============================================================
+
+  /**
+   * generateSecureKey — Genera una clave aleatoria de 12 caracteres.
+   * Usa Web Crypto API (disponible en todos los navegadores modernos).
+   * Excluye caracteres visualmente similares: 0/O, 1/l/I.
+   */
+  const generateSecureKey = (): string => {
+    const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+    const arr = new Uint8Array(12)
+    crypto.getRandomValues(arr)
+    return Array.from(arr).map(b => chars[b % chars.length]).join('')
+  }
+
+  /**
+   * handleGenerateKey — Genera y guarda una nueva clave para el usuario.
+   * La clave se muestra una vez en memoria. Al recargar la página se pierde.
+   */
+  const handleGenerateKey = async (targetUser: User) => {
+    const key = generateSecureKey()
+    const { error } = await supabase
+      .from('users')
+      .update({ access_key: key })
+      .eq('id', targetUser.id)
+
+    if (error) {
+      setErrorMsg('Error al guardar la clave: ' + error.message)
+      return
+    }
+
+    // Guardar en memoria para poder mostrarla y usarla en WhatsApp
+    setGeneratedKeys(prev => new Map(prev).set(targetUser.id, key))
+    setSuccessMsg(`Nueva clave generada para "${targetUser.name}".`)
+    await fetchUsers()
+  }
+
+  /**
+   * openWhatsApp — Abre WhatsApp con un mensaje pre-escrito con la clave.
+   * Requiere que el usuario tenga teléfono guardado y clave generada.
+   */
+  const openWhatsApp = (targetUser: User) => {
+    const phone = (targetUser.phone ?? '').replace(/\D/g, '')
+    if (!phone) {
+      alert(`${targetUser.name} no tiene número de teléfono guardado.\nEdita el usuario y agrégalo primero.`)
+      return
+    }
+    const key = generatedKeys.get(targetUser.id)
+    if (!key) {
+      alert('Primero genera una clave nueva con el botón 🔑 para este usuario.')
+      return
+    }
+    const appUrl = 'https://exhibidores-app.vercel.app'
+    const msg = encodeURIComponent(
+      `Hola ${targetUser.name} 👋\n\n` +
+      `Tu clave de acceso para la *App de Exhibidores* ha sido actualizada.\n\n` +
+      `🔑 *Contraseña:* ${key}\n\n` +
+      `Cópiala exactamente como aparece e ingrésala aquí:\n` +
+      `🌐 ${appUrl}\n\n` +
+      `_No compartas esta clave con nadie._`
+    )
+    window.open(`https://wa.me/${phone}?text=${msg}`, '_blank')
+  }
 
   // =============================================================
   // Activar / Desactivar usuario
@@ -493,13 +562,14 @@ export default function AdminUserManager() {
                 <th className="text-center px-4 py-3 font-medium text-gray-600">Género</th>
                 <th className="text-center px-4 py-3 font-medium text-gray-600">Estado</th>
                 <th className="text-center px-4 py-3 font-medium text-gray-600">Admin</th>
+                <th className="text-center px-4 py-3 font-medium text-gray-600">WhatsApp</th>
                 <th className="text-center px-4 py-3 font-medium text-gray-600">Acciones</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {filteredUsers.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-gray-400">
+                  <td colSpan={9} className="px-4 py-8 text-center text-gray-400">
                     No se encontraron usuarios.
                   </td>
                 </tr>
@@ -511,9 +581,15 @@ export default function AdminUserManager() {
                   >
                     {/* Nombre */}
                     <td className="px-4 py-3 font-medium text-gray-800">{u.name}</td>
-                    {/* Clave de acceso (parcialmente oculta) */}
+                    {/* Clave de acceso: muestra texto plano si fue generada en esta sesión, si no parcialmente oculta */}
                     <td className="px-4 py-3 text-gray-500 font-mono text-xs">
-                      {u.access_key.slice(0, 3)}{'•'.repeat(Math.max(0, u.access_key.length - 3))}
+                      {generatedKeys.has(u.id) ? (
+                        <span className="bg-yellow-50 border border-yellow-200 text-yellow-800 px-2 py-0.5 rounded font-mono text-[11px] select-all">
+                          {generatedKeys.get(u.id)}
+                        </span>
+                      ) : (
+                        <span>{u.access_key.slice(0, 3)}{'•'.repeat(Math.max(0, u.access_key.length - 3))}</span>
+                      )}
                     </td>
                     {/* Tipo de usuario con badge de color */}
                     <td className="px-4 py-3">
@@ -570,7 +646,36 @@ export default function AdminUserManager() {
                         <span className="text-gray-300">—</span>
                       )}
                     </td>
-                    {/* Botones de acción */}
+                    {/* Columna WhatsApp: generar clave + enviar */}
+                    <td className="px-4 py-3 text-center">
+                      <div className="flex items-center justify-center gap-1">
+                        {/* Botón: generar nueva clave segura */}
+                        <button
+                          onClick={() => handleGenerateKey(u)}
+                          title="Generar nueva clave segura y guardarla"
+                          className="px-2 py-1 text-[11px] font-medium bg-indigo-50 hover:bg-indigo-100 text-indigo-700 rounded-lg transition"
+                        >
+                          🔑 Generar
+                        </button>
+                        {/* Botón: abrir WhatsApp con mensaje pre-escrito */}
+                        <button
+                          onClick={() => openWhatsApp(u)}
+                          disabled={!generatedKeys.has(u.id)}
+                          title={!generatedKeys.has(u.id) ? 'Primero genera una clave' : `Enviar clave a ${u.name} por WhatsApp`}
+                          className={`px-2 py-1 text-[11px] font-medium rounded-lg transition ${
+                            generatedKeys.has(u.id)
+                              ? 'bg-green-50 hover:bg-green-100 text-green-700'
+                              : 'bg-gray-50 text-gray-300 cursor-not-allowed'
+                          }`}
+                        >
+                          📲 Enviar
+                        </button>
+                      </div>
+                      {/* Indicador: teléfono no registrado */}
+                      {!u.phone && (
+                        <p className="text-[10px] text-amber-500 mt-1">Sin teléfono</p>
+                      )}
+                    </td>
                     <td className="px-4 py-3 text-center">
                       <div className="flex items-center justify-center gap-1">
                         {/* Botón editar */}
@@ -639,8 +744,15 @@ export default function AdminUserManager() {
                 <div className="flex items-start justify-between">
                   <div>
                     <p className="font-medium text-gray-800">{u.name}</p>
+                    {/* Clave: muestra plain text si se acaba de generar */}
                     <p className="text-xs text-gray-400 font-mono mt-0.5">
-                      {u.access_key.slice(0, 3)}{'•'.repeat(Math.max(0, u.access_key.length - 3))}
+                      {generatedKeys.has(u.id) ? (
+                        <span className="bg-yellow-50 text-yellow-800 px-1.5 py-0.5 rounded text-[11px] select-all">
+                          {generatedKeys.get(u.id)}
+                        </span>
+                      ) : (
+                        <>{u.access_key.slice(0, 3)}{'•'.repeat(Math.max(0, u.access_key.length - 3))}</>
+                      )}
                     </p>
                   </div>
                   <div className="flex gap-1">
@@ -670,6 +782,27 @@ export default function AdminUserManager() {
                       }`}
                     >
                       {u.is_active ? '🚫' : '✅'}
+                    </button>
+                    {/* Generar clave */}
+                    <button
+                      onClick={() => handleGenerateKey(u)}
+                      title="Generar nueva clave segura"
+                      className="p-1.5 rounded-lg hover:bg-indigo-50 text-indigo-600 font-bold text-base"
+                    >
+                      🔑
+                    </button>
+                    {/* Enviar por WhatsApp */}
+                    <button
+                      onClick={() => openWhatsApp(u)}
+                      disabled={!generatedKeys.has(u.id)}
+                      title={generatedKeys.has(u.id) ? 'Enviar por WhatsApp' : 'Genera primero una clave'}
+                      className={`p-1.5 rounded-lg font-bold text-base ${
+                        generatedKeys.has(u.id)
+                          ? 'hover:bg-green-50 text-green-600'
+                          : 'text-gray-300 cursor-not-allowed'
+                      }`}
+                    >
+                      📲
                     </button>
                   </div>
                 </div>
@@ -869,6 +1002,25 @@ export default function AdminUserManager() {
                     }`}
                   />
                 </button>
+              </div>
+
+              {/* Campo: Teléfono WhatsApp */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">
+                  Teléfono WhatsApp
+                  <span className="ml-1 text-xs font-normal text-gray-400">(opcional)</span>
+                </label>
+                <input
+                  type="tel"
+                  value={formData.phone}
+                  onChange={e => setFormData(prev => ({ ...prev, phone: e.target.value }))}
+                  placeholder="Ej: 573001234567 (con código de país)"
+                  className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-transparent"
+                />
+                <p className="text-xs text-gray-400 mt-1">
+                  Incluye el código de país sin el “+”.
+                  Colombia: <span className="font-mono">57</span> + 10 dígitos. Ej: <span className="font-mono">573001234567</span>
+                </p>
               </div>
             </div>
 

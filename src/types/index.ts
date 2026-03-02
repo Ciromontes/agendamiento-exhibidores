@@ -27,6 +27,7 @@ export type User = {
   // precursor_auxiliar  → máx 6 turnos/mes (Fase 4)
   gender: 'M' | 'F' | null    // Género: Masculino, Femenino, o sin definir
   marital_status: string | null // Estado civil (opcional)
+  phone: string | null         // Teléfono WhatsApp con código de país (ej: 573001234567)
   is_active: boolean           // Si puede acceder al sistema
   is_admin: boolean            // Si tiene privilegios de administrador
   spouse_id: string | null     // UUID del cónyuge vinculado (Fase 3)
