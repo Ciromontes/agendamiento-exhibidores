@@ -436,8 +436,9 @@ export default function AdminUserManager() {
   }
 
   /**
-   * openWhatsApp — Copia el mensaje al portapapeles y abre WhatsApp limpio.
-   * Nunca usa ?text= para evitar que WhatsApp muestre mensajes anteriores.
+   * openWhatsApp — Abre WhatsApp con el mensaje pre-escrito vía ?text=.
+   * También copia al portapapeles como respaldo por si WhatsApp no pre-rellena.
+   * Para evitar duplicados: SIEMPRE genera una clave NUEVA antes de enviar.
    */
   const openWhatsApp = async (targetUser: User) => {
     const phone = (targetUser.phone ?? '').replace(/\D/g, '')
@@ -451,13 +452,10 @@ export default function AdminUserManager() {
       return
     }
     const message = buildWAMessage(targetUser.name, key)
-    try {
-      await navigator.clipboard.writeText(message)
-      setSuccessMsg(`📋 Mensaje copiado. Abre WhatsApp con ${targetUser.name} y pégalo.`)
-    } catch {
-      setErrorMsg('No se pudo copiar automáticamente. Copia la clave manualmente.')
-    }
-    window.open(`https://wa.me/${phone}`, '_blank')
+    // Copiar al portapapeles como respaldo
+    try { await navigator.clipboard.writeText(message) } catch { /* ignorar */ }
+    // Abrir WhatsApp con el mensaje pre-escrito
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(message)}`, '_blank')
   }
 
   // =============================================================
@@ -508,16 +506,12 @@ export default function AdminUserManager() {
     await fetchUsers()
   }
 
-  /** Copia el mensaje al portapapeles y abre WhatsApp limpio (sin ?text=) */
+  /** Abre WhatsApp con el mensaje pre-escrito y copia al portapapeles como respaldo */
   const openBulkWhatsApp = async (item: { user: User; key: string }) => {
     const phone = (item.user.phone ?? '').replace(/\D/g, '')
     const message = buildWAMessage(item.user.name, item.key)
-    try {
-      await navigator.clipboard.writeText(message)
-    } catch {
-      // Silencioso: el usuario pegará manualmente
-    }
-    window.open(`https://wa.me/${phone}`, '_blank')
+    try { await navigator.clipboard.writeText(message) } catch { /* ignorar */ }
+    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(message)}`, '_blank')
   }
 
   /** Avanza al siguiente usuario de la cola o marca como terminado */
@@ -772,18 +766,18 @@ export default function AdminUserManager() {
                         >
                           🔑 Generar
                         </button>
-                        {/* Botón: copiar mensaje al portapapeles + abrir WhatsApp */}
+                        {/* Botón: abrir WhatsApp con mensaje pre-escrito */}
                         <button
                           onClick={() => openWhatsApp(u)}
                           disabled={!generatedKeys.has(u.id)}
-                          title={!generatedKeys.has(u.id) ? 'Primero genera una clave' : `Copiar mensaje y abrir WhatsApp de ${u.name}`}
+                          title={!generatedKeys.has(u.id) ? 'Primero genera una clave' : `Enviar clave a ${u.name} por WhatsApp`}
                           className={`px-2 py-1 text-[11px] font-medium rounded-lg transition ${
                             generatedKeys.has(u.id)
                               ? 'bg-green-50 hover:bg-green-100 text-green-700'
                               : 'bg-gray-50 text-gray-300 cursor-not-allowed'
                           }`}
                         >
-                          📋 Copiar+WA
+                          📲 Enviar
                         </button>
                       </div>
                       {/* Indicador: teléfono no registrado */}
@@ -906,18 +900,18 @@ export default function AdminUserManager() {
                     >
                       🔑
                     </button>
-                    {/* Copiar mensaje y abrir WhatsApp */}
+                    {/* Enviar por WhatsApp */}
                     <button
                       onClick={() => openWhatsApp(u)}
                       disabled={!generatedKeys.has(u.id)}
-                      title={generatedKeys.has(u.id) ? 'Copiar mensaje y abrir WhatsApp' : 'Genera primero una clave'}
+                      title={generatedKeys.has(u.id) ? 'Enviar por WhatsApp' : 'Genera primero una clave'}
                       className={`p-1.5 rounded-lg font-bold text-base ${
                         generatedKeys.has(u.id)
                           ? 'hover:bg-green-50 text-green-600'
                           : 'text-gray-300 cursor-not-allowed'
                       }`}
                     >
-                      📋
+                      📲
                     </button>
                   </div>
                 </div>
@@ -1223,7 +1217,7 @@ export default function AdminUserManager() {
                     onClick={() => openBulkWhatsApp(bulkQueue[bulkIndex])}
                     className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2.5 rounded-xl font-medium text-sm transition"
                   >
-                    � Copiar y abrir WhatsApp
+                    📲 Abrir WhatsApp
                   </button>
                   <button
                     onClick={advanceBulk}
@@ -1233,7 +1227,7 @@ export default function AdminUserManager() {
                   </button>
                 </div>
                 <p className="text-xs text-center text-gray-400">
-                  El mensaje se copia al portapapeles. En WhatsApp, pégalo con mantener pulsado → Pegar.
+                  El mensaje se pre-rellena en WhatsApp. Solo revísalo y pulsa enviar.
                 </p>
               </div>
             )}
