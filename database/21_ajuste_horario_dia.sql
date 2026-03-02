@@ -55,8 +55,8 @@ DECLARE
   v_first_start time;
   v_offset      interval;
   v_count       integer := 0;
-  v_rows        integer;
   ex            RECORD;
+  slot_rec      RECORD;
 BEGIN
   -- ──────────────────────────────────────────────────────────
   -- MODO GLOBAL: recorre cada exhibidor por separado y calcula
@@ -68,26 +68,33 @@ BEGIN
         FROM time_slots
         WHERE day_of_week = p_day_of_week
     LOOP
-      -- Hora del primer bloque de ESTE exhibidor en ESTE día
       SELECT MIN(start_time) INTO v_first_start
         FROM time_slots
         WHERE exhibitor_id = ex.exhibitor_id
           AND day_of_week  = p_day_of_week;
 
       IF v_first_start IS NULL OR v_first_start = p_nueva_hora_inicio THEN
-        CONTINUE;  -- Nada que hacer para este exhibidor
+        CONTINUE;
       END IF;
 
       v_offset := p_nueva_hora_inicio - v_first_start;
 
-      UPDATE time_slots
-        SET start_time = start_time + v_offset,
-            end_time   = end_time   + v_offset
-        WHERE exhibitor_id = ex.exhibitor_id
-          AND day_of_week  = p_day_of_week;
-
-      GET DIAGNOSTICS v_rows = ROW_COUNT;
-      v_count := v_count + v_rows;
+      -- Actualizar en orden seguro para evitar conflictos de constraint única:
+      -- offset positivo (más tarde) → de mayor a menor start_time.
+      -- offset negativo (más temprano) → de menor a mayor start_time.
+      FOR slot_rec IN
+        SELECT id FROM time_slots
+          WHERE exhibitor_id = ex.exhibitor_id
+            AND day_of_week  = p_day_of_week
+          ORDER BY CASE WHEN v_offset > INTERVAL '0' THEN start_time END DESC NULLS LAST,
+                   CASE WHEN v_offset <= INTERVAL '0' THEN start_time END ASC  NULLS LAST
+      LOOP
+        UPDATE time_slots
+          SET start_time = start_time + v_offset,
+              end_time   = end_time   + v_offset
+          WHERE id = slot_rec.id;
+        v_count := v_count + 1;
+      END LOOP;
     END LOOP;
 
   -- ──────────────────────────────────────────────────────────
@@ -108,18 +115,24 @@ BEGIN
     END IF;
 
     IF v_first_start = p_nueva_hora_inicio THEN
-      RETURN 0;  -- Ya está en la hora correcta
+      RETURN 0;
     END IF;
 
     v_offset := p_nueva_hora_inicio - v_first_start;
 
-    UPDATE time_slots
-      SET start_time = start_time + v_offset,
-          end_time   = end_time   + v_offset
-      WHERE exhibitor_id = p_exhibitor_id
-        AND day_of_week  = p_day_of_week;
-
-    GET DIAGNOSTICS v_count = ROW_COUNT;
+    FOR slot_rec IN
+      SELECT id FROM time_slots
+        WHERE exhibitor_id = p_exhibitor_id
+          AND day_of_week  = p_day_of_week
+        ORDER BY CASE WHEN v_offset > INTERVAL '0' THEN start_time END DESC NULLS LAST,
+                 CASE WHEN v_offset <= INTERVAL '0' THEN start_time END ASC  NULLS LAST
+    LOOP
+      UPDATE time_slots
+        SET start_time = start_time + v_offset,
+            end_time   = end_time   + v_offset
+        WHERE id = slot_rec.id;
+      v_count := v_count + 1;
+    END LOOP;
   END IF;
 
   RETURN v_count;
@@ -156,9 +169,9 @@ DECLARE
   v_first_start time;
   v_offset      interval;
   v_count       integer := 0;
-  v_rows        integer;
   ex            RECORD;
   day_rec       RECORD;
+  slot_rec      RECORD;
 BEGIN
   -- ──────────────────────────────────────────────────────────
   -- MODO GLOBAL: recorre cada exhibidor × cada día
@@ -183,14 +196,20 @@ BEGIN
 
         v_offset := TIME '06:00:00' - v_first_start;
 
-        UPDATE time_slots
-          SET start_time = start_time + v_offset,
-              end_time   = end_time   + v_offset
-          WHERE exhibitor_id = ex.exhibitor_id
-            AND day_of_week  = day_rec.day_of_week;
-
-        GET DIAGNOSTICS v_rows = ROW_COUNT;
-        v_count := v_count + v_rows;
+        -- Actualizar en orden seguro según dirección del offset.
+        FOR slot_rec IN
+          SELECT id FROM time_slots
+            WHERE exhibitor_id = ex.exhibitor_id
+              AND day_of_week  = day_rec.day_of_week
+            ORDER BY CASE WHEN v_offset > INTERVAL '0' THEN start_time END DESC NULLS LAST,
+                     CASE WHEN v_offset <= INTERVAL '0' THEN start_time END ASC  NULLS LAST
+        LOOP
+          UPDATE time_slots
+            SET start_time = start_time + v_offset,
+                end_time   = end_time   + v_offset
+            WHERE id = slot_rec.id;
+          v_count := v_count + 1;
+        END LOOP;
       END LOOP;
     END LOOP;
 
@@ -218,14 +237,19 @@ BEGIN
 
       v_offset := TIME '06:00:00' - v_first_start;
 
-      UPDATE time_slots
-        SET start_time = start_time + v_offset,
-            end_time   = end_time   + v_offset
-        WHERE exhibitor_id = p_exhibitor_id
-          AND day_of_week  = day_rec.day_of_week;
-
-      GET DIAGNOSTICS v_rows = ROW_COUNT;
-      v_count := v_count + v_rows;
+      FOR slot_rec IN
+        SELECT id FROM time_slots
+          WHERE exhibitor_id = p_exhibitor_id
+            AND day_of_week  = day_rec.day_of_week
+          ORDER BY CASE WHEN v_offset > INTERVAL '0' THEN start_time END DESC NULLS LAST,
+                   CASE WHEN v_offset <= INTERVAL '0' THEN start_time END ASC  NULLS LAST
+      LOOP
+        UPDATE time_slots
+          SET start_time = start_time + v_offset,
+              end_time   = end_time   + v_offset
+          WHERE id = slot_rec.id;
+        v_count := v_count + 1;
+      END LOOP;
     END LOOP;
   END IF;
 
