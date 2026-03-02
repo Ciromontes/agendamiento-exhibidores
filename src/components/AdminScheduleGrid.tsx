@@ -220,6 +220,10 @@ export default function AdminScheduleGrid() {
   /**
    * handleAddSlot - Llama a crear_time_slot vía RPC.
    * La función SQL valida solapamientos antes de insertar.
+   *
+   * Si hay solapamiento con bloques existentes, en lugar de mostrar
+   * un error confuso se redirige automáticamente al modal de ajuste
+   * de inicio de día con la hora que el admin intentó usar.
    */
   const handleAddSlot = async () => {
     if (!selectedExhibitor) return
@@ -237,7 +241,21 @@ export default function AdminScheduleGrid() {
       p_block_reason: addForm.blockReason.trim() || null,
     })
     if (error) {
-      alert('Error: ' + error.message)
+      // Solapamiento con slots existentes → redirigir al ajuste de inicio de día
+      if (error.message.toLowerCase().includes('solapado') || error.message.toLowerCase().includes('constraint')) {
+        setShowAddModal(false)
+        setDayAdjustForm({
+          dayNum: parseInt(addForm.day),
+          newStartTime: addForm.startTime,
+        })
+        setShowDayModal(true)
+        setMessage({
+          type: 'error',
+          text: '⚠️ Ese horario se solapa con bloques existentes. Usa "Ajustar inicio del día" para desplazar todos los bloques a la nueva hora.',
+        })
+      } else {
+        alert('Error: ' + error.message)
+      }
     } else {
       setShowAddModal(false)
       setMessage({ type: 'success', text: '✅ Bloque creado correctamente.' })
@@ -310,6 +328,32 @@ export default function AdminScheduleGrid() {
       .filter(s => s.exhibitor_id === selectedExhibitor && s.day_of_week === dayNum)
       .sort((a, b) => a.start_time.localeCompare(b.start_time))
     return sorted[0]?.start_time?.slice(0, 5) ?? '06:00'
+  }
+
+  /**
+   * handleSetOddHours - Ajusta el horario de un día para empezar a las 05:00
+   * (horas impares: 05-07, 07-09, 09-11...). Respeta modo Local/Global.
+   */
+  const handleSetOddHours = async (dayNum: number) => {
+    const dayName = DAYS_OF_WEEK[dayNum]
+    const scope = isGlobalMode ? 'todos los exhibidores' : 'este exhibidor'
+    if (!confirm(`¿Ajustar el ${dayName} a horas impares (inicio 05:00 AM) para ${scope}?\n\nLos bloques quedarán: 05-07, 07-09, 09-11, 11-13, 13-15, 15-17.`)) return
+    const { data, error } = await supabase.rpc('ajustar_inicio_dia', {
+      p_day_of_week:       dayNum,
+      p_nueva_hora_inicio: '05:00:00',
+      p_exhibitor_id:      isGlobalMode ? null : selectedExhibitor,
+      p_global:            isGlobalMode,
+    })
+    if (error) {
+      alert('Error: ' + error.message)
+    } else {
+      const count = typeof data === 'number' ? data : 0
+      setMessage({
+        type: 'success',
+        text: `✅ ${dayName} ajustado a horas impares. ${count} bloque${count !== 1 ? 's' : ''} actualizados.`,
+      })
+      await loadData()
+    }
   }
 
   /**
@@ -516,15 +560,22 @@ export default function AdminScheduleGrid() {
       </div>
 
       {/* Instrucciones */}
-      <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4 text-sm text-amber-800">
-        <strong>Instrucciones:</strong> Toca una celda para activar/desactivar un horario.
-        Las celdas <span className="inline-block w-3 h-3 rounded bg-green-400 align-middle mx-0.5"></span> verdes están activas
-        y las <span className="inline-block w-3 h-3 rounded bg-gray-300 align-middle mx-0.5"></span> grises están desactivadas.
-        Las celdas de <span className="font-semibold">Reunión</span> no se pueden modificar.
+      <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4 text-sm text-amber-800 space-y-1">
+        <div>
+          <strong>Horarios:</strong> Toca una celda para activar o desactivar ese bloque.
+          <span className="inline-block w-3 h-3 rounded bg-green-400 align-middle mx-1"></span>Verde = activo
+          <span className="inline-block w-3 h-3 rounded bg-gray-300 align-middle mx-1"></span>Gris = inactivo.
+          🔒 Reunión no se puede modificar.
+        </div>
+        <div className="text-xs text-amber-700">
+          <strong>⏱ Ajustar</strong> (cabecera de día): desplaza todos los bloques de ese día a una nueva hora de inicio en cascada.
+          {' '}<strong>⚡ Impares</strong>: los pone en 05-07, 07-09, 09-11… (horas impares).
+          {' '}<strong>+ Agregar bloque</strong>: solo para días sin bloques o para añadir uno genuinamente nuevo.
+        </div>
         {isGlobalMode && (
-          <span className="ml-2 font-semibold text-orange-700">
-            Los cambios aplicarán a todos los exhibidores.
-          </span>
+          <div className="font-semibold text-orange-700">
+            🌐 Modo Global: cada acción afecta a todos los exhibidores.
+          </div>
         )}
       </div>
 
@@ -540,17 +591,27 @@ export default function AdminScheduleGrid() {
                 <th key={dayNum} className="px-3 py-3 text-center text-xs font-semibold uppercase tracking-wider border-r border-indigo-500 last:border-r-0">
                   <div className="flex flex-col items-center gap-1">
                     <span>{DAYS_OF_WEEK[dayNum]}</span>
-                    {/* Botón para ajustar la hora de inicio de este día */}
-                    <button
-                      onClick={() => {
-                        setDayAdjustForm({ dayNum, newStartTime: getFirstHourOfDay(dayNum) })
-                        setShowDayModal(true)
-                      }}
-                      title={`Ajustar hora de inicio de ${DAYS_OF_WEEK[dayNum]}`}
-                      className="text-[9px] text-indigo-200 hover:text-white hover:bg-white/20 rounded px-1.5 py-0.5 transition font-normal normal-case tracking-normal"
-                    >
-                      ⏱ ajustar
-                    </button>
+                    <div className="flex gap-1">
+                      {/* Ajustar hora de inicio personalizada */}
+                      <button
+                        onClick={() => {
+                          setDayAdjustForm({ dayNum, newStartTime: getFirstHourOfDay(dayNum) })
+                          setShowDayModal(true)
+                        }}
+                        title={`Ajustar hora de inicio de ${DAYS_OF_WEEK[dayNum]}`}
+                        className="text-[9px] text-indigo-200 hover:text-white hover:bg-white/20 rounded px-1.5 py-0.5 transition font-normal normal-case tracking-normal"
+                      >
+                        ⏱ ajustar
+                      </button>
+                      {/* Ajustar a horas impares (inicio 05:00) */}
+                      <button
+                        onClick={() => handleSetOddHours(dayNum)}
+                        title={`Ajustar ${DAYS_OF_WEEK[dayNum]} a horas impares (05:00-07:00, 07:00-09:00...)`}
+                        className="text-[9px] text-yellow-300 hover:text-white hover:bg-white/20 rounded px-1.5 py-0.5 transition font-normal normal-case tracking-normal"
+                      >
+                        ⚡ impares
+                      </button>
+                    </div>
                   </div>
                 </th>
               ))}
