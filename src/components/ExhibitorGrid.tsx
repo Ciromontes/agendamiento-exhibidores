@@ -111,6 +111,10 @@ export default function ExhibitorGrid() {
   // inviteModalSlot: id del slot cuyo modal de invitación está abierto.
   // inviteUsers: lista de usuarios disponibles para invitar.
   const [sentInvitations, setSentInvitations] = useState<{slot_id: string; to_user_id: string}[]>([])
+  // Invitaciones ya aceptadas esta semana (to block direct cancel — Feature 1)
+  const [acceptedInvitationSlots, setAcceptedInvitationSlots] = useState<
+    { slot_id: string; from_user_id: string; to_user_id: string }[]
+  >([])
   const [inviteModalSlot, setInviteModalSlot] = useState<string | null>(null)
   const [inviteUsers, setInviteUsers] = useState<Pick<User, 'id' | 'name' | 'user_type'>[]>([])
   const [inviteLoading, setInviteLoading] = useState(false)
@@ -136,7 +140,10 @@ export default function ExhibitorGrid() {
   const [myPendingReliefs, setMyPendingReliefs] = useState<
     { id: string; reservation_id: string; slot_id: string }[]
   >([])
-  const [openReliefBySlot, setOpenReliefBySlot] = useState<Record<string, string>>({})
+  // openReliefBySlot: relevos abiertos de OTROS en esta semana (Feature 2: incluye nombre)
+  const [openReliefBySlot, setOpenReliefBySlot] = useState<
+    Record<string, { id: string; from_user_id: string; name: string }>
+  >({})
   // coupleModal: cuando el usuario casado reserva un turno vacío, guardamos
   // el slotId aquí y mostramos el modal para elegir si agrega al cónyuge
   const [coupleModal, setCoupleModal] = useState<string | null>(null)
@@ -269,20 +276,32 @@ export default function ExhibitorGrid() {
         reliefData as { id: string; reservation_id: string; slot_id: string }[]
       )
 
+      // Invitaciones aceptadas esta semana (Feature 1: bloquear cancelación directa)
+      const { data: accInvData } = await supabase
+        .from('invitations')
+        .select('slot_id, from_user_id, to_user_id')
+        .eq('week_start', weekStart)
+        .eq('status', 'accepted')
+      if (accInvData) setAcceptedInvitationSlots(
+        accInvData as { slot_id: string; from_user_id: string; to_user_id: string }[]
+      )
+
       // Relevos abiertos de otros usuarios esta semana, del mismo género
-      // → para mostrar indicador 🔄 en celdas de la grilla a usuarios compatibles
+      // Feature 2: también cargamos id + name del solicitante
       const { data: openRelData } = await supabase
         .from('relief_requests')
-        .select('id, slot_id, from_user:users!relief_requests_from_user_id_fkey(gender)')
+        .select('id, slot_id, from_user:users!relief_requests_from_user_id_fkey(id, name, gender)')
         .neq('from_user_id', user.id)
         .eq('week_start', weekStart)
         .eq('status', 'pending')
         .is('to_user_id', null)
         .gt('expires_at', nowIso)
       if (openRelData) {
-        const map: Record<string, string> = {}
-        for (const r of openRelData as unknown as { id: string; slot_id: string; from_user: { gender: string } | null }[]) {
-          if (r.from_user?.gender === user.gender) map[r.slot_id] = r.id
+        const map: Record<string, { id: string; from_user_id: string; name: string }> = {}
+        for (const r of openRelData as unknown as { id: string; slot_id: string; from_user: { id: string; name: string; gender: string } | null }[]) {
+          if (r.from_user?.gender === user.gender) {
+            map[r.slot_id] = { id: r.id, from_user_id: r.from_user.id, name: r.from_user.name }
+          }
         }
         setOpenReliefBySlot(map)
       }
@@ -332,16 +351,20 @@ export default function ExhibitorGrid() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.spouse_id])
 
-  // Carga inicial + suscripción Realtime
+  // Carga inicial + suscripción Realtime (Feature 3: escuchar reservas, invitaciones y relevos)
   useEffect(() => {
     loadData()
 
+    const reload = () => {
+      loadData()
+      loadMonthlyReservations()
+    }
+
     const channel = supabase
-      .channel('reservations-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'reservations' }, () => {
-        loadData()
-        loadMonthlyReservations()  // Fase 4: recargar conteo mensual también
-      })
+      .channel('grid-realtime')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reservations' }, reload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'invitations' }, reload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'relief_requests' }, reload)
       .subscribe()
 
     return () => { supabase.removeChannel(channel) }
@@ -439,6 +462,17 @@ export default function ExhibitorGrid() {
 
   // Ventana de reserva para el usuario actual (calculada una vez por render).
   const bookingWindow = computeBookingWindow()
+
+  /**
+   * isViaAcceptedInvitation (Feature 1) — Retorna true si el slot tiene
+   * una invitación aceptada donde el usuario indicado es el invitante o el invitado.
+   * Cuando es true, no se permite cancelación directa: se debe pedir relevo.
+   */
+  const isViaAcceptedInvitation = (slotId: string, userId: string): boolean =>
+    acceptedInvitationSlots.some(
+      inv => inv.slot_id === slotId &&
+             (inv.from_user_id === userId || inv.to_user_id === userId)
+    )
 
   // ─── Fase 7: Compatibilidad de género para compartir turno ─────
 
@@ -788,6 +822,12 @@ export default function ExhibitorGrid() {
     const otherReservation = slotRes.find(r => r.id !== reservationId)
     const otherIsSpouse = spouse && otherReservation?.user_id === spouse.id
 
+    // Feature 1: Si la reserva vino de una invitación aceptada → siempre relevo
+    if (isViaAcceptedInvitation(myReservation.time_slot_id, user!.id)) {
+      await handleOpenReliefModal(myReservation)
+      return
+    }
+
     // Fase 9A: Si el slot está lleno (2/2), el otro ocupante no es el cónyuge,
     // y pasó la ventana de 1h → forzar flujo de relevo en lugar de cancelar.
     const activeInSlot = slotRes.length
@@ -1099,11 +1139,11 @@ export default function ExhibitorGrid() {
                                   )
                                 }
                                 // Si el ocupante tiene relevo abierto, mostrar indicador
-                                // (la persona quiere ser reemplazada, no completar el turno)
+                                // Feature 2: mostrar nombre del que pide relevo
                                 if (openReliefBySlot[slot.id]) {
                                   return (
-                                    <span className="text-[10px] text-amber-600 font-medium">
-                                      🔄 Relevo disponible
+                                    <span className="text-[10px] text-orange-600 font-medium">
+                                      🔄 {openReliefBySlot[slot.id].name} pide relevo
                                     </span>
                                   )
                                 }
@@ -1153,7 +1193,28 @@ export default function ExhibitorGrid() {
                         <p className={`font-semibold truncate text-[11px] ${isOwn1 ? 'underline' : ''}`}>
                           {pos1?.user?.name || 'Reservado'}
                         </p>
+                        {/* Feature 2: indicador inline de relevo para pos1 */}
+                        {!isOwn1 && openReliefBySlot[slot.id]?.from_user_id === pos1?.user_id && (
+                          <p className="text-[10px] text-orange-600 font-medium">🔄 pide relevo</p>
+                        )}
                         {isOwn1 && (() => {
+                          // Feature 1: reserva por invitación aceptada → siempre relevo
+                          if (isViaAcceptedInvitation(slot.id, user!.id)) {
+                            const hasPendingRelief1 = myPendingReliefs.some(
+                              r => r.reservation_id === pos1!.id
+                            )
+                            if (hasPendingRelief1) {
+                              return <span className="text-[10px] text-amber-500 font-medium">⏳ Relevo pendiente</span>
+                            }
+                            return (
+                              <button
+                                onClick={() => handleOpenReliefModal(pos1!)}
+                                className="text-orange-500 hover:text-orange-700 text-[10px] underline"
+                              >
+                                🔄 Pedir relevo
+                              </button>
+                            )
+                          }
                           // Dentro de ventana de 1h o turno de pareja → Cancelar directo
                           if (isCoupleSlot || isWithinCancelWindow(pos1!.created_at)) {
                             return (
@@ -1181,7 +1242,28 @@ export default function ExhibitorGrid() {
                         <p className={`font-semibold truncate text-[11px] ${isOwn2 ? 'underline' : ''}`}>
                           {pos2?.user?.name || 'Reservado'}
                         </p>
+                        {/* Feature 2: indicador inline de relevo para pos2 */}
+                        {!isOwn2 && openReliefBySlot[slot.id]?.from_user_id === pos2?.user_id && (
+                          <p className="text-[10px] text-orange-600 font-medium">🔄 pide relevo</p>
+                        )}
                         {isOwn2 && (() => {
+                          // Feature 1: reserva por invitación aceptada → siempre relevo
+                          if (isViaAcceptedInvitation(slot.id, user!.id)) {
+                            const hasPendingRelief2 = myPendingReliefs.some(
+                              r => r.reservation_id === pos2!.id
+                            )
+                            if (hasPendingRelief2) {
+                              return <span className="text-[10px] text-amber-500 font-medium">⏳ Relevo pendiente</span>
+                            }
+                            return (
+                              <button
+                                onClick={() => handleOpenReliefModal(pos2!)}
+                                className="text-orange-500 hover:text-orange-700 text-[10px] underline"
+                              >
+                                🔄 Pedir relevo
+                              </button>
+                            )
+                          }
                           // Dentro de ventana de 1h o turno de pareja → Cancelar directo
                           if (isCoupleSlot || isWithinCancelWindow(pos2!.created_at)) {
                             return (
@@ -1203,10 +1285,12 @@ export default function ExhibitorGrid() {
                           // Pasó la ventana → usar botón global 'Pedir Relevo' en la parte superior
                           return null
                         })()}
-                        {/* Indicador de relevo disponible para hermanos compatibles */}
-                        {!hasOwnReservation && openReliefBySlot[slot.id] && (
-                          <p className="text-[10px] text-amber-600 font-semibold mt-0.5">
-                            🔄 Relevo disponible
+                        {/* Feature 2: indicador de relevo con nombre: solo si no hay indicador inline */}
+                        {!hasOwnReservation && openReliefBySlot[slot.id] &&
+                          openReliefBySlot[slot.id].from_user_id !== pos1?.user_id &&
+                          openReliefBySlot[slot.id].from_user_id !== pos2?.user_id && (
+                          <p className="text-[10px] text-orange-600 font-semibold mt-0.5">
+                            🔄 {openReliefBySlot[slot.id].name} pide relevo
                           </p>
                         )}
                         {/* Indicador completo */}
