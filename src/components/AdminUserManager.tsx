@@ -96,6 +96,11 @@ export default function AdminUserManager() {
   // Mapea userId → clave en texto plano recién generada.
   // Se borra al recargar la página para no exponer claves.
   const [generatedKeys, setGeneratedKeys] = useState<Map<string, string>>(new Map())
+  // ─── Estado del modal de envío masivo por WhatsApp ────────
+  const [showBulkModal, setShowBulkModal] = useState(false)
+  const [bulkQueue, setBulkQueue] = useState<{ user: User; key: string }[]>([])
+  const [bulkIndex, setBulkIndex] = useState(0)
+  const [bulkStep, setBulkStep] = useState<'generating' | 'sending' | 'done'>('generating')
   // =============================================================
   // Cargar usuarios desde Supabase
   // =============================================================
@@ -378,9 +383,15 @@ export default function AdminUserManager() {
    * Usa Web Crypto API (disponible en todos los navegadores modernos).
    * Excluye caracteres visualmente similares: 0/O, 1/l/I.
    */
+  /**
+   * generateSecureKey — Clave de 16 caracteres con ~96 bits de entropía.
+   * Incluye mayúsculas, minúsculas, dígitos y caracteres especiales.
+   * Excluye caracteres visualmente confusos: 0/O, 1/l/I.
+   */
   const generateSecureKey = (): string => {
-    const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'
-    const arr = new Uint8Array(12)
+    // Charset: 63 chars → log2(63)^16 ≈ 95.7 bits de entropía
+    const chars = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789@#$%&*+!'
+    const arr = new Uint8Array(16)
     crypto.getRandomValues(arr)
     return Array.from(arr).map(b => chars[b % chars.length]).join('')
   }
@@ -422,16 +433,99 @@ export default function AdminUserManager() {
       alert('Primero genera una clave nueva con el botón 🔑 para este usuario.')
       return
     }
-    const appUrl = 'https://exhibidores-app.vercel.app'
+    // Magic link: el usuario solo toca el enlace y entra automáticamente
+    const magicLink = `https://exhibidores-app.vercel.app/?k=${encodeURIComponent(key)}`
     const msg = encodeURIComponent(
       `Hola ${targetUser.name} 👋\n\n` +
-      `Tu clave de acceso para la *App de Exhibidores* ha sido actualizada.\n\n` +
-      `🔑 *Contraseña:* ${key}\n\n` +
-      `Cópiala exactamente como aparece e ingrésala aquí:\n` +
-      `🌐 ${appUrl}\n\n` +
-      `_No compartas esta clave con nadie._`
+      `Tu acceso a la *App de Exhibidores* ha sido actualizado.\n\n` +
+      `👇 *Toca aquí para entrar directamente:*\n` +
+      `🔗 ${magicLink}\n\n` +
+      `_(Si el enlace no abre, copia esta clave e ingrésala en la app)_\n` +
+      `🔑 \`${key}\`\n\n` +
+      `_No compartas este enlace con nadie._`
     )
     window.open(`https://wa.me/${phone}?text=${msg}`, '_blank')
+  }
+
+  // =============================================================
+  // Envío masivo de claves por WhatsApp
+  // =============================================================
+
+  /**
+   * startBulkSend — genera claves nuevas para TODOS los usuarios
+   * activos con teléfono registrado y abre el modal de envío secuencial.
+   */
+  const startBulkSend = async () => {
+    const targets = users.filter(
+      u => u.is_active && (u.phone ?? '').replace(/\D/g, '').length > 5
+    )
+    if (targets.length === 0) {
+      alert(
+        'No hay usuarios activos con número de teléfono registrado.\n\n' +
+        'Edita los usuarios y agrega sus números primero.'
+      )
+      return
+    }
+    setShowBulkModal(true)
+    setBulkStep('generating')
+    setBulkIndex(0)
+    setBulkQueue([])
+
+    // Generar y guardar claves en paralelo
+    const results = await Promise.all(
+      targets.map(async u => {
+        const key = generateSecureKey()
+        const { error } = await supabase
+          .from('users')
+          .update({ access_key: key })
+          .eq('id', u.id)
+        return error ? null : { user: u, key }
+      })
+    )
+
+    const queue = results.filter((r): r is { user: User; key: string } => r !== null)
+    // Actualizar mapa de claves en memoria
+    setGeneratedKeys(prev => {
+      const next = new Map(prev)
+      queue.forEach(({ user, key }) => next.set(user.id, key))
+      return next
+    })
+    setBulkQueue(queue.sort((a, b) => a.user.name.localeCompare(b.user.name)))
+    setBulkStep('sending')
+    await fetchUsers()
+  }
+
+  /** Abre WhatsApp con la clave del usuario actual de la cola */
+  const openBulkWhatsApp = (item: { user: User; key: string }) => {
+    const phone = (item.user.phone ?? '').replace(/\D/g, '')
+    const magicLink = `https://exhibidores-app.vercel.app/?k=${encodeURIComponent(item.key)}`
+    const msg = encodeURIComponent(
+      `Hola ${item.user.name} 👋\n\n` +
+      `Tu acceso a la *App de Exhibidores* ha sido actualizado.\n\n` +
+      `👇 *Toca aquí para entrar directamente:*\n` +
+      `🔗 ${magicLink}\n\n` +
+      `_(Si el enlace no abre, copia esta clave e ingrésala en la app)_\n` +
+      `🔑 \`${item.key}\`\n\n` +
+      `_No compartas este enlace con nadie._`
+    )
+    window.open(`https://wa.me/${phone}?text=${msg}`, '_blank')
+  }
+
+  /** Avanza al siguiente usuario de la cola o marca como terminado */
+  const advanceBulk = () => {
+    if (bulkIndex + 1 >= bulkQueue.length) {
+      setBulkStep('done')
+    } else {
+      setBulkIndex(i => i + 1)
+    }
+  }
+
+  /** Cierra y reinicia el modal de envío masivo */
+  const closeBulkModal = () => {
+    setShowBulkModal(false)
+    setBulkQueue([])
+    setBulkIndex(0)
+    setBulkStep('generating')
   }
 
   // =============================================================
@@ -502,13 +596,25 @@ export default function AdminUserManager() {
               className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
             />
           </div>
-          {/* Botón para crear nuevo usuario */}
-          <button
-            onClick={openCreateModal}
-            className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2 whitespace-nowrap"
-          >
-            <span>➕</span> Nuevo Usuario
-          </button>
+          {/* Botones de acción */}
+          <div className="flex gap-2">
+            {/* Envío masivo de claves por WhatsApp */}
+            <button
+              onClick={startBulkSend}
+              title="Genera claves seguras para todos los usuarios con teléfono y las envía por WhatsApp una a una"
+              className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2 whitespace-nowrap"
+            >
+              <span>📲</span>
+              <span className="hidden sm:inline">Envío masivo</span>
+            </button>
+            {/* Crear nuevo usuario */}
+            <button
+              onClick={openCreateModal}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2 whitespace-nowrap"
+            >
+              <span>➕</span> Nuevo Usuario
+            </button>
+          </div>
         </div>
 
         {/* ─── Filtros por tipo de usuario ────────────────── */}
@@ -1048,6 +1154,97 @@ export default function AdminUserManager() {
                 )}
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════
+          MODAL: Envío masivo de claves por WhatsApp
+          ═══════════════════════════════════════════════════════ */}
+      {showBulkModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+            {/* Cabecera */}
+            <div className="bg-green-600 px-6 py-4 flex items-center justify-between">
+              <h2 className="text-white font-semibold text-lg">📲 Envío masivo — WhatsApp</h2>
+              <button onClick={closeBulkModal} className="text-white/70 hover:text-white text-xl leading-none">✕</button>
+            </div>
+
+            {/* Paso: generando claves */}
+            {bulkStep === 'generating' && (
+              <div className="p-10 text-center">
+                <div className="animate-spin rounded-full h-12 w-12 border-4 border-green-200 border-t-green-600 mx-auto mb-5" />
+                <p className="font-medium text-gray-700">Generando claves seguras...</p>
+                <p className="text-xs text-gray-400 mt-1">Espera unos segundos.</p>
+              </div>
+            )}
+
+            {/* Paso: envío secuencial */}
+            {bulkStep === 'sending' && bulkQueue.length > 0 && (
+              <div className="p-6 space-y-4">
+                {/* Progreso */}
+                <div className="flex items-center justify-between text-xs text-gray-500">
+                  <span>Usuario {bulkIndex + 1} de {bulkQueue.length}</span>
+                  <span className="font-mono bg-green-50 text-green-700 px-2 py-0.5 rounded">
+                    {Math.round((bulkIndex / bulkQueue.length) * 100)}%
+                  </span>
+                </div>
+                <div className="h-2 bg-gray-100 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-green-500 transition-all"
+                    style={{ width: `${(bulkIndex / bulkQueue.length) * 100}%` }}
+                  />
+                </div>
+
+                {/* Tarjeta del usuario actual */}
+                <div className="bg-green-50 border border-green-200 rounded-xl p-4">
+                  <p className="font-semibold text-gray-800 text-lg">{bulkQueue[bulkIndex].user.name}</p>
+                  <p className="text-xs text-gray-500 mt-0.5">📱 {bulkQueue[bulkIndex].user.phone}</p>
+                  <p className="text-[11px] font-mono mt-2 bg-white/70 px-2 py-1 rounded select-all text-gray-600">
+                    🔗 Magic link incluido en el mensaje
+                  </p>
+                  <p className="text-[11px] font-mono text-gray-500 mt-0.5 select-all">
+                    🔑 {bulkQueue[bulkIndex].key}
+                  </p>
+                </div>
+
+                {/* Botones de acción */}
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => openBulkWhatsApp(bulkQueue[bulkIndex])}
+                    className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2.5 rounded-xl font-medium text-sm transition"
+                  >
+                    📲 Abrir WhatsApp
+                  </button>
+                  <button
+                    onClick={advanceBulk}
+                    className="flex-1 border border-gray-200 hover:bg-gray-50 text-gray-700 py-2.5 rounded-xl font-medium text-sm transition"
+                  >
+                    {bulkIndex + 1 < bulkQueue.length ? '✓ Enviado, siguiente →' : '✓ Terminar'}
+                  </button>
+                </div>
+                <p className="text-xs text-center text-gray-400">
+                  Abre WhatsApp, envía el mensaje y luego pulsa &ldquo;Enviado, siguiente&rdquo;.
+                </p>
+              </div>
+            )}
+
+            {/* Paso: completado */}
+            {bulkStep === 'done' && (
+              <div className="p-10 text-center">
+                <div className="text-5xl mb-4">🎉</div>
+                <h3 className="text-lg font-semibold text-gray-800 mb-1">¡Completado!</h3>
+                <p className="text-sm text-gray-500">
+                  Claves enviadas a <strong>{bulkQueue.length}</strong> usuarios.
+                </p>
+                <button
+                  onClick={closeBulkModal}
+                  className="mt-6 bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-xl text-sm font-medium transition"
+                >
+                  Cerrar
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}

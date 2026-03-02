@@ -39,6 +39,45 @@ export default function HomePage() {
     }
   }, [user, router])
 
+  // --- Magic link: si la URL trae ?k=CLAVE, hacer login automático ---
+  // El admin envía por WhatsApp un enlace con la clave del usuario.
+  // Al abrirlo, se inicia sesión sin que el usuario tenga que escribir nada.
+  useEffect(() => {
+    if (user) return // si ya está logueado, ignorar
+    const params = new URLSearchParams(window.location.search)
+    const magicKey = params.get('k')
+    if (!magicKey) return
+
+    const autoLogin = async () => {
+      setLoading(true)
+      setAccessKey(magicKey)
+      try {
+        const supabase = createClient()
+        const { data, error: dbError } = await supabase
+          .from('users')
+          .select('*')
+          .eq('access_key', magicKey)
+          .eq('is_active', true)
+          .single()
+
+        if (dbError || !data) {
+          setError('El enlace de acceso no es válido o ya no está activo.')
+          setLoading(false)
+          return
+        }
+        // Login exitoso: limpiar ?k= de la URL por seguridad y redirigir
+        window.history.replaceState({}, '', '/')
+        setUser(data)
+        router.push(data.is_admin ? '/admin' : '/dashboard')
+      } catch {
+        setError('Error al conectar con el servidor.')
+        setLoading(false)
+      }
+    }
+
+    autoLogin()
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   /**
    * handleSubmit - Procesa el formulario de login.
    * Busca el usuario en Supabase por su access_key.
