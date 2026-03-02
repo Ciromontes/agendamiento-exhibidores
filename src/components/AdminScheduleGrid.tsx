@@ -41,6 +41,13 @@ export default function AdminScheduleGrid() {
   const [addingSaving, setAddingSaving] = useState(false)
   const [deletingSlotId, setDeletingSlotId] = useState<string | null>(null)
 
+  // ─── Modo Global / Local ─────────────────────────────────────
+  // false = Modo Local (solo exhibidor seleccionado)
+  // true  = Modo Global (todos los exhibidores con mismo bloque)
+  const [isGlobalMode, setIsGlobalMode] = useState(false)
+  // IDs de slots modificados en cualquier exhibidor (para guardado global)
+  const [changedSlotIds, setChangedSlotIds] = useState<Set<string>>(new Set())
+
   const supabase = createClient()
 
   // ─── Derivar bloques horarios dinámicamente ────────────────
@@ -99,28 +106,69 @@ export default function AdminScheduleGrid() {
     )
 
   /**
-   * toggleSlot - Alterna activo/inactivo de un slot localmente.
+   * toggleSlot - Alterna activo/inactivo de un slot.
+   * Modo local:  solo afecta el exhibidor seleccionado.
+   * Modo global: propaga el cambio a TODOS los exhibidores
+   *              que tengan ese mismo día y horario.
    */
   const toggleSlot = (dayNum: number, startTime: string) => {
-    const slot = getSlot(dayNum, startTime)
-    if (!slot || slot.block_reason) return
+    if (isGlobalMode) {
+      // Modo global: buscar todos los slots con ese día y hora
+      const matchingSlots = timeSlots.filter(
+        s => s.day_of_week === dayNum && s.start_time === startTime && !s.block_reason
+      )
+      if (matchingSlots.length === 0) return
 
-    setTimeSlots(prev =>
-      prev.map(s => s.id === slot.id ? { ...s, is_active: !s.is_active } : s)
-    )
+      // El nuevo estado lo determina el exhibidor actualmente visible
+      const clickedSlot = matchingSlots.find(s => s.exhibitor_id === selectedExhibitor)
+      const newActive = clickedSlot ? !clickedSlot.is_active : false
+
+      setTimeSlots(prev =>
+        prev.map(s =>
+          s.day_of_week === dayNum && s.start_time === startTime && !s.block_reason
+            ? { ...s, is_active: newActive }
+            : s
+        )
+      )
+      setChangedSlotIds(prev => {
+        const next = new Set(prev)
+        matchingSlots.forEach(s => next.add(s.id))
+        return next
+      })
+    } else {
+      // Modo local: solo afecta el slot del exhibidor seleccionado
+      const slot = getSlot(dayNum, startTime)
+      if (!slot || slot.block_reason) return
+
+      setTimeSlots(prev =>
+        prev.map(s => s.id === slot.id ? { ...s, is_active: !s.is_active } : s)
+      )
+      setChangedSlotIds(prev => new Set(prev).add(slot.id))
+    }
     setHasChanges(true)
     setMessage(null)
   }
 
   /**
-   * handleSave - Guarda cambios del exhibidor seleccionado en BD.
+   * handleSave - Guarda cambios en BD.
+   * Modo local:  guarda solo los slots del exhibidor seleccionado.
+   * Modo global: guarda solo los slots que fueron modificados
+   *              (puede ser en varios exhibidores).
    */
   const handleSave = async () => {
     setSaving(true)
     setMessage(null)
 
-    const exhibitorSlots = timeSlots.filter(s => s.exhibitor_id === selectedExhibitor)
-    const updates = exhibitorSlots.map(slot =>
+    let slotsToSave: typeof timeSlots
+    if (isGlobalMode) {
+      // Solo los que cambiaron globalmente
+      slotsToSave = timeSlots.filter(s => changedSlotIds.has(s.id))
+    } else {
+      // Todos los del exhibidor activo (idempotente)
+      slotsToSave = timeSlots.filter(s => s.exhibitor_id === selectedExhibitor)
+    }
+
+    const updates = slotsToSave.map(slot =>
       supabase.from('time_slots').update({ is_active: slot.is_active }).eq('id', slot.id)
     )
 
@@ -130,8 +178,17 @@ export default function AdminScheduleGrid() {
     if (hasError) {
       setMessage({ type: 'error', text: 'Error al guardar algunos horarios. Intenta de nuevo.' })
     } else {
-      setMessage({ type: 'success', text: '¡Horarios actualizados correctamente!' })
+      const exhibCount = isGlobalMode
+        ? new Set(slotsToSave.map(s => s.exhibitor_id)).size
+        : 1
+      setMessage({
+        type: 'success',
+        text: isGlobalMode
+          ? `Horarios actualizados en ${exhibCount} exhibidor${exhibCount > 1 ? 'es' : ''}.`
+          : 'Horarios actualizados correctamente.',
+      })
       setHasChanges(false)
+      setChangedSlotIds(new Set())
     }
     setSaving(false)
   }
@@ -191,26 +248,40 @@ export default function AdminScheduleGrid() {
     setDeletingSlotId(null)
   }
 
-  /** enableAll - Activa todos los slots del exhibidor (excepto bloqueados) */
+  /** enableAll - Activa slots (todos los exhibidores en modo global, solo el activo en local) */
   const enableAll = () => {
     setTimeSlots(prev =>
-      prev.map(s =>
-        s.exhibitor_id === selectedExhibitor && !s.block_reason
-          ? { ...s, is_active: true } : s
-      )
+      prev.map(s => {
+        const applies = isGlobalMode
+          ? !s.block_reason
+          : s.exhibitor_id === selectedExhibitor && !s.block_reason
+        return applies ? { ...s, is_active: true } : s
+      })
     )
+    if (isGlobalMode) {
+      setChangedSlotIds(new Set(
+        timeSlots.filter(s => !s.block_reason).map(s => s.id)
+      ))
+    }
     setHasChanges(true)
     setMessage(null)
   }
 
-  /** disableAll - Desactiva todos los slots del exhibidor (excepto bloqueados) */
+  /** disableAll - Desactiva slots (todos los exhibidores en modo global, solo el activo en local) */
   const disableAll = () => {
     setTimeSlots(prev =>
-      prev.map(s =>
-        s.exhibitor_id === selectedExhibitor && !s.block_reason
-          ? { ...s, is_active: false } : s
-      )
+      prev.map(s => {
+        const applies = isGlobalMode
+          ? !s.block_reason
+          : s.exhibitor_id === selectedExhibitor && !s.block_reason
+        return applies ? { ...s, is_active: false } : s
+      })
     )
+    if (isGlobalMode) {
+      setChangedSlotIds(new Set(
+        timeSlots.filter(s => !s.block_reason).map(s => s.id)
+      ))
+    }
     setHasChanges(true)
     setMessage(null)
   }
@@ -236,6 +307,55 @@ export default function AdminScheduleGrid() {
 
   return (
     <div>
+      {/* ── Toggle Modo Global / Modo Local ───────────────────── */}
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-3">
+        <div className="flex items-center gap-3">
+          <span className="text-sm font-semibold text-gray-700">Modo de edición:</span>
+          <div className="flex rounded-xl overflow-hidden border border-gray-200 shadow-sm text-xs font-semibold">
+            <button
+              onClick={() => { setIsGlobalMode(false); setChangedSlotIds(new Set()); setHasChanges(false); setMessage(null) }}
+              className={`px-4 py-2 transition-all ${
+                !isGlobalMode
+                  ? 'bg-indigo-600 text-white'
+                  : 'bg-white text-gray-500 hover:bg-gray-50'
+              }`}
+            >
+              📍 Local
+            </button>
+            <button
+              onClick={() => { setIsGlobalMode(true); setChangedSlotIds(new Set()); setHasChanges(false); setMessage(null) }}
+              className={`px-4 py-2 transition-all ${
+                isGlobalMode
+                  ? 'bg-orange-500 text-white'
+                  : 'bg-white text-gray-500 hover:bg-gray-50'
+              }`}
+            >
+              🌐 Global
+            </button>
+          </div>
+        </div>
+        <span className="text-xs text-gray-400">
+          {isGlobalMode
+            ? `${exhibitors.length} exhibidores afectados`
+            : 'Solo el exhibidor activo'}
+        </span>
+      </div>
+
+      {/* Banner de advertencia en modo global */}
+      {isGlobalMode && (
+        <div className="bg-orange-50 border border-orange-300 rounded-xl px-4 py-3 mb-4 flex items-start gap-3">
+          <span className="text-orange-500 text-lg mt-0.5">&#9888;</span>
+          <div>
+            <p className="text-sm font-bold text-orange-800">Modo Global activo</p>
+            <p className="text-xs text-orange-700 mt-0.5">
+              Cada cambio que hagas se aplicará simultáneamente en{' '}
+              <strong>todos los exhibidores</strong> que tengan ese mismo día y horario.
+              Los cambios de solo un exhibidor usa <strong>Modo Local</strong>.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Selector de exhibidor */}
       <div className="flex gap-2 overflow-x-auto pb-3 mb-4">
         {exhibitors.map((ex) => (
@@ -244,23 +364,42 @@ export default function AdminScheduleGrid() {
             onClick={() => { setSelectedExhibitor(ex.id); setMessage(null) }}
             className={`px-5 py-2 rounded-full text-sm font-medium whitespace-nowrap transition-all ${
               selectedExhibitor === ex.id
-                ? 'bg-indigo-600 text-white shadow-md'
+                ? isGlobalMode
+                  ? 'bg-orange-500 text-white shadow-md'
+                  : 'bg-indigo-600 text-white shadow-md'
                 : 'bg-white text-gray-600 hover:bg-gray-100 border border-gray-200'
             }`}
           >
             {ex.name}
+            {isGlobalMode && selectedExhibitor !== ex.id && (
+              <span className="ml-1.5 text-[10px] text-orange-400 font-normal">🌐</span>
+            )}
           </button>
         ))}
       </div>
 
-      {/* Acciones rápidas y botón agregar (Fase 5) */}
+      {/* Acciones rápidas y botón agregar */}
       <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
         <div className="flex gap-2 flex-wrap">
-          <button onClick={enableAll} className="px-3 py-1.5 text-xs font-medium bg-green-100 text-green-700 rounded-lg hover:bg-green-200 transition">
-            ✓ Activar todos
+          <button
+            onClick={enableAll}
+            className={`px-3 py-1.5 text-xs font-medium rounded-lg transition ${
+              isGlobalMode
+                ? 'bg-orange-100 text-orange-700 hover:bg-orange-200'
+                : 'bg-green-100 text-green-700 hover:bg-green-200'
+            }`}
+          >
+            {isGlobalMode ? '🌐' : ''} ✓ Activar todos
           </button>
-          <button onClick={disableAll} className="px-3 py-1.5 text-xs font-medium bg-red-100 text-red-700 rounded-lg hover:bg-red-200 transition">
-            ✕ Desactivar todos
+          <button
+            onClick={disableAll}
+            className={`px-3 py-1.5 text-xs font-medium rounded-lg transition ${
+              isGlobalMode
+                ? 'bg-orange-100 text-orange-700 hover:bg-orange-200'
+                : 'bg-red-100 text-red-700 hover:bg-red-200'
+            }`}
+          >
+            {isGlobalMode ? '🌐' : ''} ✕ Desactivar todos
           </button>
           {/* Fase 5: Abrir modal para crear nuevo bloque */}
           <button
@@ -284,6 +423,11 @@ export default function AdminScheduleGrid() {
         Las celdas <span className="inline-block w-3 h-3 rounded bg-green-400 align-middle mx-0.5"></span> verdes están activas
         y las <span className="inline-block w-3 h-3 rounded bg-gray-300 align-middle mx-0.5"></span> grises están desactivadas.
         Las celdas de <span className="font-semibold">Reunión</span> no se pueden modificar.
+        {isGlobalMode && (
+          <span className="ml-2 font-semibold text-orange-700">
+            Los cambios aplicarán a todos los exhibidores.
+          </span>
+        )}
       </div>
 
       {/* ── Tabla de horarios ─ Bloques dinámicos × DAY_ORDER (Lun-Dom) ── */}
@@ -397,11 +541,19 @@ export default function AdminScheduleGrid() {
           disabled={!hasChanges || saving}
           className={`px-8 py-3 rounded-xl font-semibold text-sm transition-all ${
             hasChanges
-              ? 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg hover:shadow-xl'
+              ? isGlobalMode
+                ? 'bg-orange-500 text-white hover:bg-orange-600 shadow-lg hover:shadow-xl'
+                : 'bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg hover:shadow-xl'
               : 'bg-gray-200 text-gray-400 cursor-not-allowed'
           }`}
         >
-          {saving ? 'Guardando...' : hasChanges ? '💾 Publicar horarios' : 'Sin cambios'}
+          {saving
+            ? 'Guardando...'
+            : hasChanges
+              ? isGlobalMode
+                ? `🌐 Publicar en ${exhibitors.length} exhibidores`
+                : '💾 Publicar horarios'
+              : 'Sin cambios'}
         </button>
       </div>
 
