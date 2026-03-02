@@ -25,7 +25,6 @@
 'use client'
 
 import { useEffect, useState, useCallback } from 'react'
-import { createClient } from '@/lib/supabase/client'
 import { useUser } from '@/context/UserContext'
 import { User, USER_TYPE_LABELS } from '@/types'
 
@@ -65,7 +64,6 @@ const TYPE_BADGE_COLORS: Record<string, string> = {
 // Componente principal
 // =============================================================
 export default function AdminUserManager() {
-  const supabase = createClient()
   const { user: currentAdmin } = useUser()
 
   // ─── Estado principal ──────────────────────────────────────
@@ -106,18 +104,21 @@ export default function AdminUserManager() {
   // =============================================================
   const fetchUsers = useCallback(async () => {
     setLoading(true)
-    const { data, error } = await supabase
-      .from('users')
-      .select('*')
-      .order('name', { ascending: true })
-
-    if (error) {
-      setErrorMsg('Error al cargar usuarios: ' + error.message)
-    } else {
-      setUsers(data as User[])
+    try {
+      const res = await fetch('/api/admin/users', {
+        headers: { 'x-access-key': currentAdmin?.access_key ?? '' },
+      })
+      const json = await res.json()
+      if (!res.ok) {
+        setErrorMsg('Error al cargar usuarios: ' + (json.error ?? 'Error desconocido'))
+      } else {
+        setUsers(json.users as User[])
+      }
+    } catch {
+      setErrorMsg('Error al conectar con el servidor.')
     }
     setLoading(false)
-  }, [supabase])
+  }, [currentAdmin?.access_key])
 
   // Cargar usuarios al montar el componente
   useEffect(() => {
@@ -253,22 +254,28 @@ export default function AdminUserManager() {
 
     if (editingUser) {
       // ─── ACTUALIZAR usuario existente ────────────────────
-      const { error } = await supabase
-        .from('users')
-        .update({
+      const res = await fetch(`/api/admin/users/${editingUser.id}`, {
+        method: 'PATCH',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-access-key': currentAdmin?.access_key ?? '',
+        },
+        body: JSON.stringify({
           name: formData.name.trim(),
           access_key: formData.access_key,
           user_type: formData.user_type,
           gender: formData.gender,
-          is_admin: formData.is_admin,          phone: formData.phone.replace(/\D/g, '') || null,        })
-        .eq('id', editingUser.id)
+          is_admin: formData.is_admin,
+          phone: formData.phone,
+        }),
+      })
+      const json = await res.json()
 
-      if (error) {
-        // Error 23505 = clave duplicada en BD
-        if (error.code === '23505') {
+      if (!res.ok) {
+        if (res.status === 409) {
           setFormErrors(['Esa clave de acceso ya está en uso por otro usuario.'])
         } else {
-          setFormErrors(['Error al actualizar: ' + error.message])
+          setFormErrors(['Error al actualizar: ' + (json.error ?? 'Error desconocido')])
         }
         setSaving(false)
         return
@@ -277,21 +284,28 @@ export default function AdminUserManager() {
       setSuccessMsg(`Usuario "${formData.name.trim()}" actualizado correctamente.`)
     } else {
       // ─── CREAR usuario nuevo ─────────────────────────────
-      const { error } = await supabase
-        .from('users')
-        .insert({
+      const res = await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-access-key': currentAdmin?.access_key ?? '',
+        },
+        body: JSON.stringify({
           name: formData.name.trim(),
           access_key: formData.access_key,
           user_type: formData.user_type,
           gender: formData.gender,
           is_admin: formData.is_admin,
-          is_active: true,          phone: formData.phone.replace(/\D/g, '') || null,        })
+          phone: formData.phone,
+        }),
+      })
+      const json2 = await res.json()
 
-      if (error) {
-        if (error.code === '23505') {
+      if (!res.ok) {
+        if (res.status === 409) {
           setFormErrors(['Esa clave de acceso ya está en uso.'])
         } else {
-          setFormErrors(['Error al crear usuario: ' + error.message])
+          setFormErrors(['Error al crear usuario: ' + (json2.error ?? 'Error desconocido')])
         }
         setSaving(false)
         return
@@ -322,14 +336,19 @@ export default function AdminUserManager() {
     if (!spouseTargetUser) return
     setSavingSpouse(true)
 
-    // Llamar a la función SQL atómica vincular_conyuges
-    const { error } = await supabase.rpc('vincular_conyuges', {
-      p_user_a: spouseTargetUser.id,
-      p_user_b: spouseUser.id,
+    // Llamar a la API Route que ejecuta la función SQL vincular_conyuges
+    const res = await fetch(`/api/admin/users/${spouseTargetUser.id}/spouse`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-access-key': currentAdmin?.access_key ?? '',
+      },
+      body: JSON.stringify({ spouse_id: spouseUser.id }),
     })
+    const json = await res.json()
 
-    if (error) {
-      setErrorMsg('Error al vincular cónyuges: ' + error.message)
+    if (!res.ok) {
+      setErrorMsg('Error al vincular cónyuges: ' + (json.error ?? 'Error desconocido'))
     } else {
       setSuccessMsg(`${spouseTargetUser.name} y ${spouseUser.name} vinculados como cónyuges.`)
     }
@@ -347,12 +366,14 @@ export default function AdminUserManager() {
     const spouseName = users.find(u => u.id === targetUser.spouse_id)?.name || 'su cónyuge'
     if (!confirm(`¿Desvincular a ${targetUser.name} de ${spouseName}?`)) return
 
-    const { error } = await supabase.rpc('desvincular_conyuges', {
-      p_user_id: targetUser.id,
+    const res2 = await fetch(`/api/admin/users/${targetUser.id}/spouse`, {
+      method: 'DELETE',
+      headers: { 'x-access-key': currentAdmin?.access_key ?? '' },
     })
+    const json2 = await res2.json()
 
-    if (error) {
-      setErrorMsg('Error al desvincular: ' + error.message)
+    if (!res2.ok) {
+      setErrorMsg('Error al desvincular: ' + (json2.error ?? 'Error desconocido'))
     } else {
       setSuccessMsg(`${targetUser.name} y ${spouseName} desvinculados.`)
     }
@@ -401,17 +422,18 @@ export default function AdminUserManager() {
    * La clave se muestra una vez en memoria. Al recargar la página se pierde.
    */
   const handleGenerateKey = async (targetUser: User) => {
-    const key = generateSecureKey()
-    const { error } = await supabase
-      .from('users')
-      .update({ access_key: key })
-      .eq('id', targetUser.id)
+    const res = await fetch(`/api/admin/users/${targetUser.id}/key`, {
+      method: 'POST',
+      headers: { 'x-access-key': currentAdmin?.access_key ?? '' },
+    })
+    const json = await res.json()
 
-    if (error) {
-      setErrorMsg('Error al guardar la clave: ' + error.message)
+    if (!res.ok) {
+      setErrorMsg('Error al guardar la clave: ' + (json.error ?? 'Error desconocido'))
       return
     }
 
+    const key = json.key as string
     // Guardar en memoria para poder mostrarla y usarla en WhatsApp
     setGeneratedKeys(prev => new Map(prev).set(targetUser.id, key))
     setSuccessMsg(`Nueva clave generada para "${targetUser.name}".`)
@@ -482,15 +504,16 @@ export default function AdminUserManager() {
     setBulkIndex(0)
     setBulkQueue([])
 
-    // Generar y guardar claves en paralelo
+    // Generar y guardar claves en paralelo (via API Route — servicio_role en servidor)
     const results = await Promise.all(
       targets.map(async u => {
-        const key = generateSecureKey()
-        const { error } = await supabase
-          .from('users')
-          .update({ access_key: key })
-          .eq('id', u.id)
-        return error ? null : { user: u, key }
+        const res = await fetch(`/api/admin/users/${u.id}/key`, {
+          method: 'POST',
+          headers: { 'x-access-key': currentAdmin?.access_key ?? '' },
+        })
+        if (!res.ok) return null
+        const json = await res.json()
+        return { user: u, key: json.key as string }
       })
     )
 
@@ -542,13 +565,18 @@ export default function AdminUserManager() {
     }
 
     const newStatus = !targetUser.is_active
-    const { error } = await supabase
-      .from('users')
-      .update({ is_active: newStatus })
-      .eq('id', targetUser.id)
+    const res = await fetch(`/api/admin/users/${targetUser.id}`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-access-key': currentAdmin?.access_key ?? '',
+      },
+      body: JSON.stringify({ is_active: newStatus }),
+    })
+    const json = await res.json()
 
-    if (error) {
-      setErrorMsg('Error al cambiar estado: ' + error.message)
+    if (!res.ok) {
+      setErrorMsg('Error al cambiar estado: ' + (json.error ?? 'Error desconocido'))
       return
     }
 

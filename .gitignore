@@ -48,5 +48,7 @@ next-env.d.ts
 
 # documentos internos de análisis (no publicar)
 ESCALADO_MULTI_CONGREGACION.md
+PRUEBA_DE_CARGA.md
+CIBERSEGURIDAD.md
 
 .vercel

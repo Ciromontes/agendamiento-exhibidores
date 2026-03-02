@@ -19,7 +19,6 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
 import { useUser } from '@/context/UserContext'
 
 export default function HomePage() {
@@ -52,23 +51,22 @@ export default function HomePage() {
       setLoading(true)
       setAccessKey(magicKey)
       try {
-        const supabase = createClient()
-        const { data, error: dbError } = await supabase
-          .from('users')
-          .select('*')
-          .eq('access_key', magicKey)
-          .eq('is_active', true)
-          .single()
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ access_key: magicKey }),
+        })
+        const json = await res.json()
 
-        if (dbError || !data) {
+        if (!res.ok || !json.user) {
           setError('El enlace de acceso no es válido o ya no está activo.')
           setLoading(false)
           return
         }
         // Login exitoso: limpiar ?k= de la URL por seguridad y redirigir
         window.history.replaceState({}, '', '/')
-        setUser(data)
-        router.push(data.is_admin ? '/admin' : '/dashboard')
+        setUser(json.user)
+        router.push(json.user.is_admin ? '/admin' : '/dashboard')
       } catch {
         setError('Error al conectar con el servidor.')
         setLoading(false)
@@ -90,26 +88,23 @@ export default function HomePage() {
     setError('')
     setLoading(true)
     try {
-      const supabase = createClient()
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ access_key: accessKey.trim() }),
+      })
+      const json = await res.json()
 
-      // Buscar usuario por clave de acceso + que esté activo
-      const { data, error: dbError } = await supabase
-        .from('users')
-        .select('*')
-        .eq('access_key', accessKey.trim())  // Comparar clave
-        .eq('is_active', true)                // Solo usuarios activos
-        .single()                             // Esperamos exactamente 1 resultado
-
-      if (dbError || !data) {
+      if (!res.ok || !json.user) {
         setError('Clave inválida o usuario inactivo')
         setLoading(false)
         return
       }
 
       // Login exitoso: guardar usuario en contexto + localStorage
-      setUser(data)
+      setUser(json.user)
       // Redirigir según rol
-      router.push(data.is_admin ? '/admin' : '/dashboard')
+      router.push(json.user.is_admin ? '/admin' : '/dashboard')
     } catch {
       setError('Error al conectar con el servidor')
     } finally {
