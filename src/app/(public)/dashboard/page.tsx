@@ -19,6 +19,7 @@ import ReliefBadge from '@/components/ReliefBadge'
 import NotificationBell from '@/components/NotificationBell'
 import WeekHistoryPanel from '@/components/WeekHistoryPanel'
 import GlobalReliefButton from '@/components/GlobalReliefButton'
+import OpeningCountdown from '@/components/OpeningCountdown'
 import { USER_TYPE_LABELS } from '@/types'
 import { createClient } from '@/lib/supabase/client'
 
@@ -132,6 +133,8 @@ export default function DashboardPage() {
             </div>
             {/* Fase 10: Botón global de relevo — reemplaza AbsenceToggle */}
             <GlobalReliefButton />
+            {/* Anuncio de próxima apertura de reservas con cuenta regresiva */}
+            <OpeningCountdown />
             <ExhibitorGrid />
           </>
         ) : (
