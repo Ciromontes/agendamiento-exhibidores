@@ -21,12 +21,10 @@ import WeekHistoryPanel from '@/components/WeekHistoryPanel'
 import GlobalReliefButton from '@/components/GlobalReliefButton'
 import OpeningCountdown from '@/components/OpeningCountdown'
 import { USER_TYPE_LABELS } from '@/types'
-import { createClient } from '@/lib/supabase/client'
 
 export default function DashboardPage() {
   const { user, isLoading, logout } = useUser()
   const router = useRouter()
-  const supabase = createClient()
 
   // Estado para el nombre del cónyuge (Fase 3)
   const [spouseName, setSpouseName] = useState<string | null>(null)
@@ -49,12 +47,13 @@ export default function DashboardPage() {
       return
     }
     const fetchSpouse = async () => {
-      const { data } = await supabase
-        .from('users')
-        .select('name')
-        .eq('id', user.spouse_id!)
-        .single()
-      if (data) setSpouseName(data.name)
+      try {
+        const res = await fetch(`/api/users/${user.spouse_id}`)
+        if (res.ok) {
+          const data = await res.json()
+          setSpouseName(data.name)
+        }
+      } catch { /* ignorar */ }
     }
     fetchSpouse()
   // eslint-disable-next-line react-hooks/exhaustive-deps
