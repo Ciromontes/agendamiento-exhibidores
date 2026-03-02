@@ -213,6 +213,11 @@ export default function AdminScheduleGrid() {
    */
   const handleAddSlot = async () => {
     if (!selectedExhibitor) return
+    // Validación client-side: hora fin debe ser mayor que hora inicio
+    if (addForm.endTime <= addForm.startTime) {
+      alert('La hora de fin debe ser mayor que la hora de inicio.')
+      return
+    }
     setAddingSaving(true)
     const { error } = await supabase.rpc('crear_time_slot', {
       p_exhibitor_id: selectedExhibitor,
@@ -607,31 +612,29 @@ export default function AdminScheduleGrid() {
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-gray-500 mb-1">Hora inicio</label>
-                  <select
+                  <input
+                    type="time"
                     value={addForm.startTime}
                     onChange={e => setAddForm(f => ({ ...f, startTime: e.target.value }))}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                  >
-                    {['05:00','06:00','07:00','08:00','09:00','10:00','11:00',
-                      '12:00','13:00','14:00','15:00','16:00','17:00','18:00',
-                      '19:00','20:00'].map(t => (
-                      <option key={t} value={t}>{t}</option>
-                    ))}
-                  </select>
+                  />
                 </div>
                 <div>
                   <label className="block text-xs font-semibold text-gray-500 mb-1">Hora fin</label>
-                  <select
+                  <input
+                    type="time"
                     value={addForm.endTime}
                     onChange={e => setAddForm(f => ({ ...f, endTime: e.target.value }))}
-                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                  >
-                    {['06:00','07:00','08:00','09:00','10:00','11:00','12:00',
-                      '13:00','14:00','15:00','16:00','17:00','18:00','19:00',
-                      '20:00','21:00'].map(t => (
-                      <option key={t} value={t}>{t}</option>
-                    ))}
-                  </select>
+                    min={addForm.startTime}
+                    className={`w-full px-3 py-2 border rounded-lg text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400 ${
+                      addForm.endTime && addForm.startTime && addForm.endTime <= addForm.startTime
+                        ? 'border-red-400 bg-red-50'
+                        : 'border-gray-300'
+                    }`}
+                  />
+                  {addForm.endTime && addForm.startTime && addForm.endTime <= addForm.startTime && (
+                    <p className="text-[11px] text-red-500 mt-1">La hora fin debe ser mayor que la hora inicio.</p>
+                  )}
                 </div>
               </div>
 
