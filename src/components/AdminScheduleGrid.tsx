@@ -48,6 +48,16 @@ export default function AdminScheduleGrid() {
   // IDs de slots modificados en cualquier exhibidor (para guardado global)
   const [changedSlotIds, setChangedSlotIds] = useState<Set<string>>(new Set())
 
+  // ─── Ajuste de inicio de día ─────────────────────────────────
+  const [showDayModal, setShowDayModal] = useState(false)
+  const [dayAdjustForm, setDayAdjustForm] = useState<{ dayNum: number; newStartTime: string }>({
+    dayNum: 1,
+    newStartTime: '06:00',
+  })
+  const [dayAdjustSaving, setDayAdjustSaving] = useState(false)
+  // Restablecer horarios a las 06:00
+  const [resetting, setResetting] = useState(false)
+
   const supabase = createClient()
 
   // ─── Derivar bloques horarios dinámicamente ────────────────
@@ -291,6 +301,76 @@ export default function AdminScheduleGrid() {
     setMessage(null)
   }
 
+  /**
+   * getFirstHourOfDay - Retorna la hora de inicio del primer slot del día
+   * para el exhibidor seleccionado (formato "HH:mm").
+   */
+  const getFirstHourOfDay = (dayNum: number): string => {
+    const sorted = timeSlots
+      .filter(s => s.exhibitor_id === selectedExhibitor && s.day_of_week === dayNum)
+      .sort((a, b) => a.start_time.localeCompare(b.start_time))
+    return sorted[0]?.start_time?.slice(0, 5) ?? '06:00'
+  }
+
+  /**
+   * handleAdjustDay - Desplaza todos los slots de un día para que el primero
+   * comience en dayAdjustForm.newStartTime.
+   * Modo local: solo el exhibidor seleccionado.
+   * Modo global: todos los exhibidores.
+   */
+  const handleAdjustDay = async () => {
+    setDayAdjustSaving(true)
+    const { data, error } = await supabase.rpc('ajustar_inicio_dia', {
+      p_day_of_week:       dayAdjustForm.dayNum,
+      p_nueva_hora_inicio: dayAdjustForm.newStartTime + ':00',
+      p_exhibitor_id:      isGlobalMode ? null : selectedExhibitor,
+      p_global:            isGlobalMode,
+    })
+    if (error) {
+      alert('Error al ajustar horario: ' + error.message)
+    } else {
+      setShowDayModal(false)
+      const count = typeof data === 'number' ? data : 0
+      setMessage({
+        type: 'success',
+        text: `✅ Horario ajustado. ${count} bloque${count !== 1 ? 's' : ''} actualizados.`,
+      })
+      await loadData()
+    }
+    setDayAdjustSaving(false)
+  }
+
+  /**
+   * handleResetDefault - Resetea todos los slots de todos los días a empezar
+   * a las 06:00 AM.
+   * Modo local: solo el exhibidor seleccionado.
+   * Modo global: todos los exhibidores.
+   */
+  const handleResetDefault = async () => {
+    const scope = isGlobalMode ? 'TODOS los exhibidores' : 'este exhibidor'
+    if (!confirm(
+      `¿Restablecer los horarios a 06:00 AM para ${scope}?\n` +
+      'Todos los bloques de cada día se desplazarán al inicio por defecto.'
+    )) return
+
+    setResetting(true)
+    const { data, error } = await supabase.rpc('resetear_horarios_defecto', {
+      p_exhibitor_id: isGlobalMode ? null : selectedExhibitor,
+      p_global:       isGlobalMode,
+    })
+    if (error) {
+      alert('Error al restablecer: ' + error.message)
+    } else {
+      const count = typeof data === 'number' ? data : 0
+      setMessage({
+        type: 'success',
+        text: `✅ Horarios restablecidos a 06:00 AM. ${count} bloque${count !== 1 ? 's' : ''} actualizados.`,
+      })
+      await loadData()
+    }
+    setResetting(false)
+  }
+
   // Contadores de slots activos
   const activeCount = timeSlots.filter(
     s => s.exhibitor_id === selectedExhibitor && s.is_active && !s.block_reason
@@ -406,6 +486,19 @@ export default function AdminScheduleGrid() {
           >
             {isGlobalMode ? '🌐' : ''} ✕ Desactivar todos
           </button>
+          {/* Restablecer todos los días a inicio 06:00 AM */}
+          <button
+            onClick={handleResetDefault}
+            disabled={resetting}
+            className={`px-3 py-1.5 text-xs font-medium rounded-lg transition disabled:opacity-50 ${
+              isGlobalMode
+                ? 'bg-orange-100 text-orange-700 hover:bg-orange-200'
+                : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+            }`}
+            title="Restablecer todos los horarios al inicio por defecto (06:00 AM)"
+          >
+            {resetting ? '⏳ Restableciendo...' : `${isGlobalMode ? '🌐' : ''}🔄 Restablecer horarios`}
+          </button>
           {/* Fase 5: Abrir modal para crear nuevo bloque */}
           <button
             onClick={() => {
@@ -445,7 +538,20 @@ export default function AdminScheduleGrid() {
               </th>
               {DAY_ORDER.map((dayNum) => (
                 <th key={dayNum} className="px-3 py-3 text-center text-xs font-semibold uppercase tracking-wider border-r border-indigo-500 last:border-r-0">
-                  {DAYS_OF_WEEK[dayNum]}
+                  <div className="flex flex-col items-center gap-1">
+                    <span>{DAYS_OF_WEEK[dayNum]}</span>
+                    {/* Botón para ajustar la hora de inicio de este día */}
+                    <button
+                      onClick={() => {
+                        setDayAdjustForm({ dayNum, newStartTime: getFirstHourOfDay(dayNum) })
+                        setShowDayModal(true)
+                      }}
+                      title={`Ajustar hora de inicio de ${DAYS_OF_WEEK[dayNum]}`}
+                      className="text-[9px] text-indigo-200 hover:text-white hover:bg-white/20 rounded px-1.5 py-0.5 transition font-normal normal-case tracking-normal"
+                    >
+                      ⏱ ajustar
+                    </button>
+                  </div>
                 </th>
               ))}
             </tr>
@@ -670,6 +776,103 @@ export default function AdminScheduleGrid() {
                 className="flex-1 px-4 py-2.5 text-sm font-medium text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 transition disabled:opacity-60"
               >
                 {addingSaving ? 'Creando...' : '+ Crear bloque'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal: Ajustar inicio de día ──────────────────────────
+          Se abre al hacer clic en "⏱ ajustar" en la cabecera de
+          cualquier columna de día. Desplaza en cascada todos los
+          slots de ese día para que el primero empiece a la hora
+          indicada. Respeta el modo Local / Global.               */}
+      {showDayModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm">
+            {/* Encabezado */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+              <h3 className="text-lg font-bold text-gray-800">⏱ Ajustar inicio del día</h3>
+              <button
+                onClick={() => setShowDayModal(false)}
+                className="text-gray-400 hover:text-gray-600 text-xl font-bold leading-none"
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Formulario */}
+            <div className="px-6 py-5 space-y-4">
+              {/* Explicación contextual */}
+              <div className={`rounded-lg px-3 py-2 text-xs border ${
+                isGlobalMode
+                  ? 'bg-orange-50 border-orange-200 text-orange-700'
+                  : 'bg-blue-50 border-blue-200 text-blue-700'
+              }`}>
+                Todos los bloques del día{' '}
+                <strong>{DAYS_OF_WEEK[dayAdjustForm.dayNum]}</strong> se desplazarán
+                para que el primero comience a la hora indicada.
+                {isGlobalMode && (
+                  <span className="font-semibold"> Se aplicará a todos los exhibidores.</span>
+                )}
+              </div>
+
+              {/* Selector de día */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1">
+                  Día de la semana
+                </label>
+                <select
+                  value={dayAdjustForm.dayNum}
+                  onChange={e => setDayAdjustForm(f => ({ ...f, dayNum: parseInt(e.target.value) }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                >
+                  <option value="1">Lunes</option>
+                  <option value="2">Martes</option>
+                  <option value="3">Miércoles</option>
+                  <option value="4">Jueves</option>
+                  <option value="5">Viernes</option>
+                  <option value="6">Sábado</option>
+                  <option value="0">Domingo</option>
+                </select>
+              </div>
+
+              {/* Nueva hora de inicio */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-500 mb-1">
+                  Nueva hora de inicio
+                </label>
+                <input
+                  type="time"
+                  value={dayAdjustForm.newStartTime}
+                  onChange={e => setDayAdjustForm(f => ({ ...f, newStartTime: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-400"
+                />
+                <p className="text-[11px] text-gray-400 mt-1">
+                  Hora actual del primer bloque:{' '}
+                  <strong>{getFirstHourOfDay(dayAdjustForm.dayNum)}</strong>
+                </p>
+              </div>
+            </div>
+
+            {/* Botones */}
+            <div className="flex gap-3 px-6 pb-5">
+              <button
+                onClick={() => setShowDayModal(false)}
+                className="flex-1 px-4 py-2.5 text-sm font-medium text-gray-600 bg-gray-100 rounded-xl hover:bg-gray-200 transition"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleAdjustDay}
+                disabled={dayAdjustSaving}
+                className={`flex-1 px-4 py-2.5 text-sm font-medium text-white rounded-xl transition disabled:opacity-60 ${
+                  isGlobalMode
+                    ? 'bg-orange-500 hover:bg-orange-600'
+                    : 'bg-indigo-600 hover:bg-indigo-700'
+                }`}
+              >
+                {dayAdjustSaving ? 'Ajustando...' : `${isGlobalMode ? '🌐' : '⏱'} Confirmar ajuste`}
               </button>
             </div>
           </div>
