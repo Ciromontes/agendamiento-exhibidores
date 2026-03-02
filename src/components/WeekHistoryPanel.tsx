@@ -56,6 +56,7 @@ const PAST_WEEKS: { label: string; value: string }[] = Array.from(
 export default function WeekHistoryPanel() {
   const { user } = useUser()
   const supabase  = createClient()
+  const congregationId = user?.congregation_id ?? ''
 
   const [selectedWeek,      setSelectedWeek]      = useState(PAST_WEEKS[0]?.value ?? '')
   const [exhibitors,        setExhibitors]         = useState<Exhibitor[]>([])
@@ -71,8 +72,8 @@ export default function WeekHistoryPanel() {
     setLoading(true)
 
     const [exhibRes, slotRes, resRes] = await Promise.all([
-      supabase.from('exhibitors').select('*').eq('is_active', true).order('name'),
-      supabase.from('time_slots').select('*'),
+      supabase.from('exhibitors').select('*').eq('congregation_id', congregationId).eq('is_active', true).order('name'),
+      supabase.from('time_slots').select('*').eq('congregation_id', congregationId),
       supabase
         .from('reservations')
         .select('*, user:users(id, name)')

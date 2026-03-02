@@ -1,41 +1,66 @@
 /**
- * app/page.tsx — Landing Page / Login Global (V4 Multi-Tenant)
+ * app/[slug]/page.tsx — Login de Congregación Específica (V4 Multi-Tenant)
  * ─────────────────────────────────────────────────────────────
- * Página raíz. Tiene dos comportamientos:
+ * Página de login para una congregación identificada por su slug.
+ * URL: /{slug}  → ej: /principal, /torres-rio
  *
- * 1. Si el usuario ya tiene sesión activa (localStorage):
- *    → Redirige a /{slug}/admin o /{slug}/dashboard según el rol.
+ * Flujo:
+ *   1. Se muestra el formulario de login CON el nombre de la congregación
+ *   2. El usuario ingresa su clave de acceso
+ *   3. Se llama a POST /api/auth/login con { access_key, slug }
+ *   4. Si es válido → setSession(user, slug) → redirigir a /{slug}/dashboard
  *
- * 2. Si viene un magic link (?k=CLAVE):
- *    → Login global (busca en todas las congregaciones) y redirige
- *      al slug correspondiente. Retrocompatibilidad con links viejos.
- *
- * 3. Sin sesión y sin magic link:
- *    → Muestra formulario de login global con campo de clave.
- *    → Alternativamente, el usuario puede ir a /{slug} directamente.
+ * También maneja magic links: /{slug}?k=CLAVE
  * ─────────────────────────────────────────────────────────────
  */
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, use } from 'react'
 import { useRouter } from 'next/navigation'
 import { useUser } from '@/context/UserContext'
 
-export default function HomePage() {
+type Props = {
+  params: Promise<{ slug: string }>
+}
+
+export default function CongregationLoginPage({ params }: Props) {
+  const { slug } = use(params)
+
   const [accessKey, setAccessKey] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [congregationName, setCongregationName] = useState<string | null>(null)
+  const [notFound, setNotFound] = useState(false)
+
   const router = useRouter()
-  const { user, congregationSlug, setSession } = useUser()
+  const { user, setSession } = useUser()
 
-  // Si ya hay sesión activa, redirigir al slug correspondiente
+  // Si ya está logueado en ESTA congregación, redirigir directamente
   useEffect(() => {
-    if (user && congregationSlug) {
-      router.push(user.is_admin ? `/${congregationSlug}/admin` : `/${congregationSlug}/dashboard`)
+    if (user && user.congregation_id) {
+      router.push(user.is_admin ? `/${slug}/admin` : `/${slug}/dashboard`)
     }
-  }, [user, congregationSlug, router])
+  }, [user, slug, router])
 
-  // Magic link global: /?k=CLAVE  (retrocompatibilidad)
+  // Cargar nombre de la congregación para mostrarlo en el título
+  useEffect(() => {
+    const fetchCongregation = async () => {
+      try {
+        const res = await fetch(`/api/congregations/${slug}`)
+        if (!res.ok) {
+          setNotFound(true)
+          return
+        }
+        const data = await res.json()
+        setCongregationName(data.name)
+      } catch {
+        setNotFound(true)
+      }
+    }
+    fetchCongregation()
+  }, [slug])
+
+  // Magic link: /{slug}?k=CLAVE  →  login automático
   useEffect(() => {
     if (user) return
     const params = new URLSearchParams(window.location.search)
@@ -46,16 +71,15 @@ export default function HomePage() {
       setLoading(true)
       setAccessKey(magicKey)
       try {
-        // Login global sin slug → el servidor busca en todas las congregaciones
         const res = await fetch('/api/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ access_key: magicKey }),
+          body: JSON.stringify({ access_key: magicKey, slug }),
         })
         const json = await res.json()
 
         if (res.status === 429) {
-          setError(json.error || 'Demasiados intentos. Espera unos minutos e intenta de nuevo.')
+          setError(json.error || 'Demasiados intentos. Espera unos minutos.')
           setLoading(false)
           return
         }
@@ -64,9 +88,8 @@ export default function HomePage() {
           setLoading(false)
           return
         }
-        const slug = json.congregationSlug ?? 'principal'
-        window.history.replaceState({}, '', '/')
-        setSession(json.user, slug)
+        window.history.replaceState({}, '', `/${slug}`)
+        setSession(json.user, json.congregationSlug ?? slug)
         router.push(json.user.is_admin ? `/${slug}/admin` : `/${slug}/dashboard`)
       } catch {
         setError('Error al conectar con el servidor.')
@@ -74,7 +97,8 @@ export default function HomePage() {
       }
     }
     autoLogin()
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -86,12 +110,17 @@ export default function HomePage() {
       const res = await fetch('/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ access_key: accessKey.trim() }),
+        body: JSON.stringify({ access_key: accessKey.trim(), slug }),
       })
       const json = await res.json()
 
       if (res.status === 429) {
-        setError(json.error || 'Demasiados intentos. Espera unos minutos e intenta de nuevo.')
+        setError(json.error || 'Demasiados intentos. Espera unos minutos.')
+        setLoading(false)
+        return
+      }
+      if (res.status === 404) {
+        setNotFound(true)
         setLoading(false)
         return
       }
@@ -101,8 +130,7 @@ export default function HomePage() {
         return
       }
 
-      const slug = json.congregationSlug ?? 'principal'
-      setSession(json.user, slug)
+      setSession(json.user, json.congregationSlug ?? slug)
       router.push(json.user.is_admin ? `/${slug}/admin` : `/${slug}/dashboard`)
     } catch {
       setError('Error al conectar con el servidor')
@@ -111,17 +139,43 @@ export default function HomePage() {
     }
   }
 
+  // Congregación no encontrada
+  if (notFound) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
+        <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md text-center">
+          <div className="text-5xl mb-4">🔍</div>
+          <h1 className="text-2xl font-bold text-gray-800 mb-2">Congregación no encontrada</h1>
+          <p className="text-gray-500 mb-6">
+            No existe una congregación con el identificador <code className="bg-gray-100 px-2 py-1 rounded text-indigo-700">{slug}</code>
+          </p>
+          <button
+            onClick={() => router.push('/')}
+            className="bg-indigo-600 text-white px-6 py-2 rounded-lg hover:bg-indigo-700 transition"
+          >
+            Ir al inicio
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-xl p-8 w-full max-w-md">
-        {/* Logo y título de la app */}
+        {/* Logo y título */}
         <div className="text-center mb-8">
           <div className="text-5xl mb-3">📋</div>
           <h1 className="text-3xl font-bold text-indigo-700">Exhibidores</h1>
-          <p className="text-gray-500 mt-2">Sistema de Agendamiento</p>
+          {congregationName ? (
+            <p className="text-indigo-500 font-medium mt-1">{congregationName}</p>
+          ) : (
+            <p className="text-gray-400 mt-1 text-sm">Cargando...</p>
+          )}
+          <p className="text-gray-500 text-sm mt-1">Sistema de Agendamiento</p>
         </div>
 
-        {/* Formulario de login global */}
+        {/* Formulario de login */}
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -146,17 +200,18 @@ export default function HomePage() {
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={loading || !congregationName}
             className="w-full bg-indigo-600 text-white py-3 rounded-lg font-medium hover:bg-indigo-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {loading ? 'Verificando...' : 'Entrar'}
           </button>
         </form>
 
-        {/* Tip: si tienes el slug de tu congregación */}
+        {/* Enlace al inicio */}
         <p className="text-center text-gray-400 text-xs mt-6">
-          ¿Conoces la URL de tu congregación?{' '}
-          <span className="text-indigo-400">Escríbela directamente en el navegador</span>
+          <button onClick={() => router.push('/')} className="hover:text-indigo-500 transition">
+            ← Volver al inicio
+          </button>
         </p>
       </div>
     </div>

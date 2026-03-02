@@ -16,6 +16,7 @@ import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { DAYS_OF_WEEK, formatTimeLabel } from '@/types'
 import type { Exhibitor, TimeSlot, Reservation } from '@/types'
+import { useUser } from '@/context/UserContext'
 
 // ─── Helpers de fecha ────────────────────────────────────────
 
@@ -44,6 +45,8 @@ const MAX_PAST_WEEKS = 16
 
 export default function AdminWeekReport() {
   const supabase = createClient()
+  const { user } = useUser()
+  const congregationId = user?.congregation_id ?? ''
 
   // offset 0 = semana actual, 1 = semana anterior, etc.
   const [offset,     setOffset]     = useState(0)
@@ -59,8 +62,8 @@ export default function AdminWeekReport() {
   const loadData = useCallback(async () => {
     setLoading(true)
     const [exhibRes, slotRes, resRes] = await Promise.all([
-      supabase.from('exhibitors').select('*').eq('is_active', true).order('name'),
-      supabase.from('time_slots').select('*').eq('is_active', true),
+      supabase.from('exhibitors').select('*').eq('is_active', true).eq('congregation_id', congregationId).order('name'),
+      supabase.from('time_slots').select('*').eq('is_active', true).eq('congregation_id', congregationId),
       supabase
         .from('reservations')
         .select('*, user:users(id, name)')

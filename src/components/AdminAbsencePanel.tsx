@@ -17,6 +17,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { USER_TYPE_LABELS } from '@/types'
+import { useUser } from '@/context/UserContext'
 
 /** Calcula el lunes de la semana actual en formato YYYY-MM-DD */
 function getCurrentWeekStart(): string {
@@ -52,6 +53,8 @@ type AbsenceRow = {
 
 export default function AdminAbsencePanel() {
   const supabase = createClient()
+  const { user } = useUser()
+  const congregationId = user?.congregation_id ?? ''
   const [weekStart, setWeekStart] = useState(getCurrentWeekStart())
   const [absences, setAbsences] = useState<AbsenceRow[]>([])
   const [loading, setLoading] = useState(true)
@@ -65,6 +68,7 @@ export default function AdminAbsencePanel() {
       .from('absences')
       .select('id, user_id, week_start, reason, created_at, user:users(id, name, user_type)')
       .eq('week_start', weekStart)
+      .eq('congregation_id', congregationId)
       .order('created_at', { ascending: false })
 
     if (!data) { setLoading(false); return }

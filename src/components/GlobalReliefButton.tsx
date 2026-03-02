@@ -60,6 +60,7 @@ export default function GlobalReliefButton() {
   const { user } = useUser()
   const supabase = createClient()
   const weekStart = getCurrentWeekStart()
+  const congregationId = user?.congregation_id ?? ''
 
   // ─── Estado principal ────────────────────────────────────
   const [reservations, setReservations] = useState<ReservationItem[]>([])
@@ -158,13 +159,14 @@ export default function GlobalReliefButton() {
         : new Date(Date.now() + 2 * 3_600_000).toISOString()
 
       return {
-        reservation_id: res.id,
-        slot_id:        res.time_slot_id,
-        week_start:     weekStart,
-        from_user_id:   user.id,
-        to_user_id:     null,       // relevo abierto (cualquier hermano compatible)
-        status:         'pending',
-        expires_at:     expiresAt,
+        reservation_id:  res.id,
+        slot_id:         res.time_slot_id,
+        week_start:      weekStart,
+        from_user_id:    user.id,
+        to_user_id:      null,       // relevo abierto (cualquier hermano compatible)
+        status:          'pending',
+        expires_at:      expiresAt,
+        congregation_id: congregationId,
       }
     })
 

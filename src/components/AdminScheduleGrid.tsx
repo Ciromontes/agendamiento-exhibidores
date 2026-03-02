@@ -18,6 +18,7 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { Exhibitor, TimeSlot, DAYS_OF_WEEK, DAY_ORDER, formatTimeLabel } from '@/types'
+import { useUser } from '@/context/UserContext'
 
 export default function AdminScheduleGrid() {
   // --- Estado del componente ---
@@ -59,6 +60,8 @@ export default function AdminScheduleGrid() {
   const [resetting, setResetting] = useState(false)
 
   const supabase = createClient()
+  const { user } = useUser()
+  const congregationId = user?.congregation_id ?? ''
 
   // ─── Derivar bloques horarios dinámicamente ────────────────
   // Extraer combinaciones únicas (start_time, end_time) del exhibidor
@@ -85,8 +88,8 @@ export default function AdminScheduleGrid() {
   const loadData = useCallback(async () => {
     setLoading(true)
     const [exhibitorsRes, slotsRes] = await Promise.all([
-      supabase.from('exhibitors').select('*').eq('is_active', true).order('name'),
-      supabase.from('time_slots').select('*'),
+      supabase.from('exhibitors').select('*').eq('is_active', true).eq('congregation_id', congregationId).order('name'),
+      supabase.from('time_slots').select('*').eq('congregation_id', congregationId),
     ])
 
     if (exhibitorsRes.data) {

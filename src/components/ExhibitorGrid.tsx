@@ -84,6 +84,7 @@ export default function ExhibitorGrid() {
   const [loading, setLoading] = useState(true)
   const [actionLoading, setActionLoading] = useState<string | null>(null)
   const { user } = useUser()
+  const congregationId = user?.congregation_id ?? ''
 
   // ─── Estado de configuración global (Fase 4 + 6) ────────────
   // Modo de conteo: 'weekly' (semanal) o 'monthly' (mensual).
@@ -165,6 +166,7 @@ export default function ExhibitorGrid() {
       const { data } = await supabase
         .from('app_config')
         .select('counting_mode, priority_enabled, priority_mode, priority_hours_auxiliar, priority_hours_publicador, booking_opens_day, booking_opens_time')
+        .eq('congregation_id', congregationId)
         .limit(1)
         .single()
       if (data) {
@@ -211,8 +213,8 @@ export default function ExhibitorGrid() {
    */
   const loadData = useCallback(async () => {
     const [exhibitorsRes, slotsRes, reservationsRes] = await Promise.all([
-      supabase.from('exhibitors').select('*').eq('is_active', true).order('name'),
-      supabase.from('time_slots').select('*'),
+      supabase.from('exhibitors').select('*').eq('is_active', true).eq('congregation_id', congregationId).order('name'),
+      supabase.from('time_slots').select('*').eq('congregation_id', congregationId),
       supabase
         .from('reservations')
         .select('*, user:users(id, name, gender)')
@@ -561,12 +563,13 @@ export default function ExhibitorGrid() {
     const expiresAt = new Date(Date.now() + 2 * 3_600_000).toISOString()
 
     const { error } = await supabase.from('invitations').insert({
-      slot_id:      inviteModalSlot,
-      week_start:   weekStart,
-      from_user_id: user.id,
-      to_user_id:   toUserId,
-      status:       'pending',
-      expires_at:   expiresAt,
+      slot_id:          inviteModalSlot,
+      week_start:       weekStart,
+      from_user_id:     user.id,
+      to_user_id:       toUserId,
+      status:           'pending',
+      expires_at:       expiresAt,
+      congregation_id:  user.congregation_id,
     })
     if (error) {
       alert('Error al enviar invitación: ' + error.message)
@@ -643,13 +646,14 @@ export default function ExhibitorGrid() {
       : new Date(Date.now() + 2 * 3_600_000).toISOString()
 
     const { error } = await supabase.from('relief_requests').insert({
-      reservation_id: reservationId,
-      slot_id:        slotId,
-      week_start:     weekStart,
-      from_user_id:   user.id,
-      to_user_id:     type === 'personal' ? toUserId : null,
-      status:         'pending',
-      expires_at:     expiresAt,
+      reservation_id:  reservationId,
+      slot_id:         slotId,
+      week_start:      weekStart,
+      from_user_id:    user.id,
+      to_user_id:      type === 'personal' ? toUserId : null,
+      status:          'pending',
+      expires_at:      expiresAt,
+      congregation_id: user.congregation_id,
     })
 
     if (error) {
@@ -753,11 +757,12 @@ export default function ExhibitorGrid() {
 
     // Insertar reserva del usuario
     const { error } = await supabase.from('reservations').insert({
-      time_slot_id: slotId,
-      user_id: user.id,
-      week_start: weekStart,
-      status: 'confirmed',
-      slot_position: position,
+      time_slot_id:    slotId,
+      user_id:         user.id,
+      week_start:      weekStart,
+      status:          'confirmed',
+      slot_position:   position,
+      congregation_id: user.congregation_id,
     })
 
     if (error) {
@@ -765,11 +770,12 @@ export default function ExhibitorGrid() {
         // Condición de carrera: intentar la otra posición
         const otherPosition = position === 1 ? 2 : 1
         const { error: retryError } = await supabase.from('reservations').insert({
-          time_slot_id: slotId,
-          user_id: user.id,
-          week_start: weekStart,
-          status: 'confirmed',
-          slot_position: otherPosition,
+          time_slot_id:    slotId,
+          user_id:         user.id,
+          week_start:      weekStart,
+          status:          'confirmed',
+          slot_position:   otherPosition,
+          congregation_id: user.congregation_id,
         })
         if (retryError) {
           alert('Este turno acaba de ser completado por otra persona.')
@@ -788,11 +794,12 @@ export default function ExhibitorGrid() {
     // ─── Fase 3: Reservar cónyuge si el usuario eligió hacerlo ───
     if (slotIsEmpty && withSpouse === true && spouse) {
       const { error: spouseError } = await supabase.from('reservations').insert({
-        time_slot_id: slotId,
-        user_id: spouse.id,
-        week_start: weekStart,
-        status: 'confirmed',
-        slot_position: 2,
+        time_slot_id:    slotId,
+        user_id:         spouse.id,
+        week_start:      weekStart,
+        status:          'confirmed',
+        slot_position:   2,
+        congregation_id: user.congregation_id,
       })
       // Si falla la reserva del cónyuge, no es crítico.
       // El usuario ya quedó reservado; el cónyuge puede hacerlo después.

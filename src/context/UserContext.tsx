@@ -1,5 +1,5 @@
 /**
- * context/UserContext.tsx
+ * context/UserContext.tsx — V4 Multi-Tenant
  * ─────────────────────────────────────────────────────────────
  * Contexto global de usuario para toda la aplicación.
  *
@@ -8,7 +8,9 @@
  *
  * Provee:
  *   - user: datos del usuario logueado (o null)
+ *   - congregationSlug: slug de la congregación activa (ej: 'principal')
  *   - setUser: guardar/actualizar usuario en estado + localStorage
+ *   - setSession: guardar usuario + slug en estado + localStorage (V4)
  *   - isLoading: true mientras se carga el usuario desde localStorage
  *   - logout: limpiar sesión y redirigir al login
  *
@@ -23,10 +25,12 @@ import { User } from '@/types'
 
 // Tipo del contexto: lo que provee el UserProvider
 type UserContextType = {
-  user: User | null                     // Usuario logueado (null = no logueado)
-  setUser: (user: User | null) => void  // Función para guardar usuario
-  isLoading: boolean                    // ¿Está cargando desde localStorage?
-  logout: () => void                    // Cerrar sesión
+  user: User | null                              // Usuario logueado (null = no logueado)
+  congregationSlug: string | null               // V4: slug de la congregación activa
+  setUser: (user: User | null) => void           // Función para guardar usuario (legacy)
+  setSession: (user: User, slug: string) => void // V4: guardar usuario + slug
+  isLoading: boolean                             // ¿Está cargando desde localStorage?
+  logout: () => void                             // Cerrar sesión
 }
 
 // Crear el contexto con valor inicial undefined
@@ -39,6 +43,7 @@ const UserContext = createContext<UserContextType | undefined>(undefined)
  */
 export function UserProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
+  const [congregationSlug, setCongregationSlug] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true) // Empieza cargando
 
   // Al montar: intentar restaurar sesión guardada en localStorage
@@ -48,9 +53,12 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       try {
         // Parsear los datos guardados del usuario
         setUser(JSON.parse(storedUser))
+        const storedSlug = localStorage.getItem('exhibidor-congregation-slug')
+        if (storedSlug) setCongregationSlug(storedSlug)
       } catch {
         // Si el JSON está corrupto, limpiar localStorage
         localStorage.removeItem('exhibidor-user')
+        localStorage.removeItem('exhibidor-congregation-slug')
       }
     }
     setIsLoading(false) // Ya terminó de cargar
@@ -59,15 +67,28 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   /**
    * handleSetUser - Guarda el usuario en estado y localStorage.
    * Si newUser es null, limpia localStorage (logout).
+   * @deprecated Usar setSession(user, slug) en V4 para que el slug quede guardado.
    */
   const handleSetUser = (newUser: User | null) => {
     setUser(newUser)
     if (newUser) {
-      // Guardar sesión para que persista al recargar la página
       localStorage.setItem('exhibidor-user', JSON.stringify(newUser))
     } else {
       localStorage.removeItem('exhibidor-user')
+      localStorage.removeItem('exhibidor-congregation-slug')
+      setCongregationSlug(null)
     }
+  }
+
+  /**
+   * setSession - V4: Guarda usuario + slug de congregación.
+   * Usar esto en lugar de setUser cuando se hace login con slug.
+   */
+  const handleSetSession = (newUser: User, slug: string) => {
+    setUser(newUser)
+    setCongregationSlug(slug)
+    localStorage.setItem('exhibidor-user', JSON.stringify(newUser))
+    localStorage.setItem('exhibidor-congregation-slug', slug)
   }
 
   /**
@@ -76,12 +97,21 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
    */
   const logout = () => {
     setUser(null)
+    setCongregationSlug(null)
     localStorage.removeItem('exhibidor-user')
+    localStorage.removeItem('exhibidor-congregation-slug')
   }
 
   // Proveer el contexto a todos los componentes hijos
   return (
-    <UserContext.Provider value={{ user, setUser: handleSetUser, isLoading, logout }}>
+    <UserContext.Provider value={{
+      user,
+      congregationSlug,
+      setUser: handleSetUser,
+      setSession: handleSetSession,
+      isLoading,
+      logout,
+    }}>
       {children}
     </UserContext.Provider>
   )
@@ -92,7 +122,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
  * Debe usarse dentro de un <UserProvider>.
  *
  * Ejemplo de uso:
- *   const { user, logout } = useUser()
+ *   const { user, congregationSlug, logout } = useUser()
  *   if (user?.is_admin) { ... }
  */
 export function useUser() {

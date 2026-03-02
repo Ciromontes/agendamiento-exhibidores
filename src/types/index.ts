@@ -1,18 +1,27 @@
 /**
- * types/index.ts — V3 (Fase 4)
+ * types/index.ts — V4 (Multi-Tenant)
  * ─────────────────────────────────────────────────────────────
  * Definiciones de tipos TypeScript para toda la aplicación.
  * Estos tipos coinciden con las tablas de Supabase después de
- * ejecutar los scripts 01-11.
+ * ejecutar los scripts 01-27.
  *
  * V2: 3 tipos de usuario, 2 personas por turno, domingos,
  *     configuración global (app_config).
  * V3: Fase 3 (parejas) + Fase 4 (límites semanal/mensual).
- *     - WEEKLY_LIMITS: límites por semana.
- *     - MONTHLY_LIMITS: límites por mes (Precursor Auxiliar = 6).
- *     - getMonthStart(): helper para calcular inicio de mes.
+ * V4: Multi-tenant (script 26-27): congregation_id en todas las
+ *     tablas + tipo Congregation + is_super_admin en User.
  * ─────────────────────────────────────────────────────────────
  */
+
+// ─── Tipo: Congregación (V4 Multi-Tenant) ────────────────────
+// Una unidad de negocio independiente con sus propios datos.
+export type Congregation = {
+  id: string          // UUID de la congregación
+  name: string        // Nombre legible (ej: 'Congregación Torres del Río')
+  slug: string        // Identificador URL (ej: 'torres-rio')
+  is_active: boolean  // Si está habilitada
+  created_at: string  // Fecha de creación
+}
 
 // ─── Tipo: Usuario ───────────────────────────────────────────
 // Representa un publicador o administrador del sistema.
@@ -30,7 +39,9 @@ export type User = {
   phone: string | null         // Teléfono WhatsApp con código de país (ej: 573001234567)
   is_active: boolean           // Si puede acceder al sistema
   is_admin: boolean            // Si tiene privilegios de administrador
+  is_super_admin: boolean      // V4: Super admin global (todas las congregaciones)
   spouse_id: string | null     // UUID del cónyuge vinculado (Fase 3)
+  congregation_id: string      // V4: A qué congregación pertenece
   created_at: string           // Fecha de creación (ISO string)
 }
 
@@ -40,6 +51,7 @@ export type Exhibitor = {
   id: string                   // UUID del exhibidor
   name: string                 // Nombre del punto de exhibición
   is_active: boolean           // Si está habilitado para reservas
+  congregation_id: string      // V4: A qué congregación pertenece
   created_at: string           // Fecha de creación
 }
 
@@ -54,6 +66,7 @@ export type TimeSlot = {
   end_time: string             // Hora de fin (formato 'HH:mm:ss')
   is_active: boolean           // Si está disponible para reservar
   block_reason: string | null  // Razón de bloqueo ('Reunión', etc.) o null
+  congregation_id: string      // V4: A qué congregación pertenece
   created_at: string           // Fecha de creación
 }
 
@@ -67,6 +80,7 @@ export type Reservation = {
   week_start: string           // Lunes de la semana (formato 'YYYY-MM-DD')
   status: 'confirmed' | 'pending' | 'cancelled'  // Estado actual
   slot_position: number        // 1 = primera persona, 2 = segunda persona
+  congregation_id: string      // V4: A qué congregación pertenece
   created_at: string           // Cuándo se creó la reserva
   // Joins opcionales (con .select('*, user:users(...)'))
   user?: Pick<User, 'id' | 'name' | 'gender'>    // Datos del usuario
@@ -115,6 +129,7 @@ export type Invitation = {
   to_user_id: string                                     // Quién recibe la invitación
   status: 'pending' | 'accepted' | 'declined'            // Estado actual
   expires_at: string                                     // Cuándo expira (ISO string)
+  congregation_id: string                                // V4: A qué congregación pertenece
   created_at: string                                     // Cuándo se creó
   // Joins opcionales
   from_user?: Pick<User, 'id' | 'name'>
@@ -135,6 +150,7 @@ export type ReliefRequest = {
   to_user_id: string | null                            // null = abierto
   status: 'pending' | 'accepted' | 'cancelled'
   expires_at: string                                   // Cuándo expira
+  congregation_id: string                              // V4: A qué congregación pertenece
   created_at: string
   // Joins opcionales
   from_user?: Pick<User, 'id' | 'name' | 'gender'>
@@ -151,6 +167,7 @@ export type Absence = {
   user_id: string                              // Quién está ausente
   week_start: string                           // Semana (YYYY-MM-DD)
   reason: string | null                        // Motivo opcional
+  congregation_id: string                      // V4: A qué congregación pertenece
   created_at: string
   // Join opcional
   user?: Pick<User, 'id' | 'name' | 'user_type'>

@@ -24,6 +24,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import type { Exhibitor } from '@/types'
+import { useUser } from '@/context/UserContext'
 
 // ─── Tipo interno: exhibidor + contadores ────────────────────
 type ExhibitorRow = Exhibitor & {
@@ -64,6 +65,8 @@ export default function AdminExhibitorManager() {
   const [showInactive, setShowInactive] = useState(false)
 
   const supabase = createClient()
+  const { user } = useUser()
+  const congregationId = user?.congregation_id ?? ''
   const weekStart = getWeekStart()
 
   // ─── Cargar exhibidores con contadores ─────────────────────
@@ -74,6 +77,7 @@ export default function AdminExhibitorManager() {
     const { data: exhData } = await supabase
       .from('exhibitors')
       .select('*')
+      .eq('congregation_id', congregationId)
       .order('name')
 
     if (!exhData) { setLoading(false); return }
@@ -83,6 +87,7 @@ export default function AdminExhibitorManager() {
       .from('time_slots')
       .select('exhibitor_id')
       .eq('is_active', true)
+      .eq('congregation_id', congregationId)
 
     const slotCounts = new Map<string, number>()
     slotsData?.forEach(s => {
@@ -131,6 +136,7 @@ export default function AdminExhibitorManager() {
     const { error } = await supabase.from('exhibitors').insert({
       name: trimmed,
       is_active: true,
+      congregation_id: congregationId,
     })
 
     if (error) {
