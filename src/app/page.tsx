@@ -58,6 +58,11 @@ export default function HomePage() {
         })
         const json = await res.json()
 
+        if (res.status === 429) {
+          setError(json.error || 'Demasiados intentos. Espera unos minutos e intenta de nuevo.')
+          setLoading(false)
+          return
+        }
         if (!res.ok || !json.user) {
           setError('El enlace de acceso no es válido o ya no está activo.')
           setLoading(false)
@@ -95,8 +100,13 @@ export default function HomePage() {
       })
       const json = await res.json()
 
+      if (res.status === 429) {
+        setError(json.error || 'Demasiados intentos. Espera unos minutos e intenta de nuevo.')
+        setLoading(false)
+        return
+      }
       if (!res.ok || !json.user) {
-        setError('Clave inválida o usuario inactivo')
+        setError(json.error || 'Clave inválida o usuario inactivo')
         setLoading(false)
         return
       }
