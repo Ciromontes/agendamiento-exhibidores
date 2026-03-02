@@ -419,10 +419,27 @@ export default function AdminUserManager() {
   }
 
   /**
-   * openWhatsApp — Abre WhatsApp con un mensaje pre-escrito con la clave.
-   * Requiere que el usuario tenga teléfono guardado y clave generada.
+   * buildWAMessage — Construye el texto del mensaje de WhatsApp.
+   * Se reutiliza tanto para envío individual como masivo.
    */
-  const openWhatsApp = (targetUser: User) => {
+  const buildWAMessage = (name: string, key: string): string => {
+    const magicLink = `https://exhibidores-app.vercel.app/?k=${encodeURIComponent(key)}`
+    return (
+      `Hola ${name} 👋\n\n` +
+      `Tu acceso a la *App de Exhibidores* ha sido actualizado.\n\n` +
+      `👇 *Toca aquí para entrar directamente:*\n` +
+      `${magicLink}\n\n` +
+      `_(Si el enlace no abre, copia esta clave e ingrésala en la app)_\n` +
+      `🔑 \`${key}\`\n\n` +
+      `_No compartas este enlace con nadie._`
+    )
+  }
+
+  /**
+   * openWhatsApp — Copia el mensaje al portapapeles y abre WhatsApp limpio.
+   * Nunca usa ?text= para evitar que WhatsApp muestre mensajes anteriores.
+   */
+  const openWhatsApp = async (targetUser: User) => {
     const phone = (targetUser.phone ?? '').replace(/\D/g, '')
     if (!phone) {
       alert(`${targetUser.name} no tiene número de teléfono guardado.\nEdita el usuario y agrégalo primero.`)
@@ -433,18 +450,14 @@ export default function AdminUserManager() {
       alert('Primero genera una clave nueva con el botón 🔑 para este usuario.')
       return
     }
-    // Magic link: el usuario solo toca el enlace y entra automáticamente
-    const magicLink = `https://exhibidores-app.vercel.app/?k=${encodeURIComponent(key)}`
-    const msg = encodeURIComponent(
-      `Hola ${targetUser.name} 👋\n\n` +
-      `Tu acceso a la *App de Exhibidores* ha sido actualizado.\n\n` +
-      `👇 *Toca aquí para entrar directamente:*\n` +
-      `🔗 ${magicLink}\n\n` +
-      `_(Si el enlace no abre, copia esta clave e ingrésala en la app)_\n` +
-      `🔑 \`${key}\`\n\n` +
-      `_No compartas este enlace con nadie._`
-    )
-    window.open(`https://wa.me/${phone}?text=${msg}`, '_blank')
+    const message = buildWAMessage(targetUser.name, key)
+    try {
+      await navigator.clipboard.writeText(message)
+      setSuccessMsg(`📋 Mensaje copiado. Abre WhatsApp con ${targetUser.name} y pégalo.`)
+    } catch {
+      setErrorMsg('No se pudo copiar automáticamente. Copia la clave manualmente.')
+    }
+    window.open(`https://wa.me/${phone}`, '_blank')
   }
 
   // =============================================================
@@ -495,20 +508,16 @@ export default function AdminUserManager() {
     await fetchUsers()
   }
 
-  /** Abre WhatsApp con la clave del usuario actual de la cola */
-  const openBulkWhatsApp = (item: { user: User; key: string }) => {
+  /** Copia el mensaje al portapapeles y abre WhatsApp limpio (sin ?text=) */
+  const openBulkWhatsApp = async (item: { user: User; key: string }) => {
     const phone = (item.user.phone ?? '').replace(/\D/g, '')
-    const magicLink = `https://exhibidores-app.vercel.app/?k=${encodeURIComponent(item.key)}`
-    const msg = encodeURIComponent(
-      `Hola ${item.user.name} 👋\n\n` +
-      `Tu acceso a la *App de Exhibidores* ha sido actualizado.\n\n` +
-      `👇 *Toca aquí para entrar directamente:*\n` +
-      `🔗 ${magicLink}\n\n` +
-      `_(Si el enlace no abre, copia esta clave e ingrésala en la app)_\n` +
-      `🔑 \`${item.key}\`\n\n` +
-      `_No compartas este enlace con nadie._`
-    )
-    window.open(`https://wa.me/${phone}?text=${msg}`, '_blank')
+    const message = buildWAMessage(item.user.name, item.key)
+    try {
+      await navigator.clipboard.writeText(message)
+    } catch {
+      // Silencioso: el usuario pegará manualmente
+    }
+    window.open(`https://wa.me/${phone}`, '_blank')
   }
 
   /** Avanza al siguiente usuario de la cola o marca como terminado */
@@ -763,18 +772,18 @@ export default function AdminUserManager() {
                         >
                           🔑 Generar
                         </button>
-                        {/* Botón: abrir WhatsApp con mensaje pre-escrito */}
+                        {/* Botón: copiar mensaje al portapapeles + abrir WhatsApp */}
                         <button
                           onClick={() => openWhatsApp(u)}
                           disabled={!generatedKeys.has(u.id)}
-                          title={!generatedKeys.has(u.id) ? 'Primero genera una clave' : `Enviar clave a ${u.name} por WhatsApp`}
+                          title={!generatedKeys.has(u.id) ? 'Primero genera una clave' : `Copiar mensaje y abrir WhatsApp de ${u.name}`}
                           className={`px-2 py-1 text-[11px] font-medium rounded-lg transition ${
                             generatedKeys.has(u.id)
                               ? 'bg-green-50 hover:bg-green-100 text-green-700'
                               : 'bg-gray-50 text-gray-300 cursor-not-allowed'
                           }`}
                         >
-                          📲 Enviar
+                          📋 Copiar+WA
                         </button>
                       </div>
                       {/* Indicador: teléfono no registrado */}
@@ -897,18 +906,18 @@ export default function AdminUserManager() {
                     >
                       🔑
                     </button>
-                    {/* Enviar por WhatsApp */}
+                    {/* Copiar mensaje y abrir WhatsApp */}
                     <button
                       onClick={() => openWhatsApp(u)}
                       disabled={!generatedKeys.has(u.id)}
-                      title={generatedKeys.has(u.id) ? 'Enviar por WhatsApp' : 'Genera primero una clave'}
+                      title={generatedKeys.has(u.id) ? 'Copiar mensaje y abrir WhatsApp' : 'Genera primero una clave'}
                       className={`p-1.5 rounded-lg font-bold text-base ${
                         generatedKeys.has(u.id)
                           ? 'hover:bg-green-50 text-green-600'
                           : 'text-gray-300 cursor-not-allowed'
                       }`}
                     >
-                      📲
+                      📋
                     </button>
                   </div>
                 </div>
@@ -1214,7 +1223,7 @@ export default function AdminUserManager() {
                     onClick={() => openBulkWhatsApp(bulkQueue[bulkIndex])}
                     className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2.5 rounded-xl font-medium text-sm transition"
                   >
-                    📲 Abrir WhatsApp
+                    � Copiar y abrir WhatsApp
                   </button>
                   <button
                     onClick={advanceBulk}
@@ -1224,7 +1233,7 @@ export default function AdminUserManager() {
                   </button>
                 </div>
                 <p className="text-xs text-center text-gray-400">
-                  Abre WhatsApp, envía el mensaje y luego pulsa &ldquo;Enviado, siguiente&rdquo;.
+                  El mensaje se copia al portapapeles. En WhatsApp, pégalo con mantener pulsado → Pegar.
                 </p>
               </div>
             )}
