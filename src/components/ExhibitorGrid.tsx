@@ -516,18 +516,15 @@ export default function ExhibitorGrid() {
 
   /**
    * handleSendInvitation - Envía una invitación al usuario seleccionado.
-   * Fase 7b: calcula expires_at dinámicamente:
-   *   - Si hoy es el día de apertura semanal (bookingOpensDow) → 2 horas
-   *   - Cualquier otro día → 24 horas
+   * La invitación expira en 2 horas sin importar el día.
+   * Si en ese tiempo nadie acepta, el turno queda libre.
    */
   const handleSendInvitation = async (toUserId: string) => {
     if (!user || !inviteModalSlot) return
     setInviteSending(toUserId)
 
-    // Calcular expiración dinámica
-    const isOpeningDay = new Date().getDay() === priorityConfig.bookingOpensDow
-    const hoursToExpire = isOpeningDay ? 2 : 24
-    const expiresAt = new Date(Date.now() + hoursToExpire * 3_600_000).toISOString()
+    // 2 horas fijas — tiempo suficiente para responder sin bloquear el turno
+    const expiresAt = new Date(Date.now() + 2 * 3_600_000).toISOString()
 
     const { error } = await supabase.from('invitations').insert({
       slot_id:      inviteModalSlot,
@@ -592,7 +589,8 @@ export default function ExhibitorGrid() {
    * type 'open'     → to_user_id = null  (cualquiera del mismo género)
    * type 'personal' → to_user_id = UUID  (usuario específico)
    *
-   * expires_at = mínimo entre: inicio del turno y ahora+24h.
+   * expires_at = mínimo entre: inicio del turno y ahora+2h.
+   * (si el turno es en 30 min, expira en 30 min; si es mañana, expira en 2h)
    */
   const handleSendRelief = async (
     reservationId: string,
@@ -607,8 +605,8 @@ export default function ExhibitorGrid() {
       ? getSlotDatetime(weekStart, slot.day_of_week, slot.start_time)
       : null
     const expiresAt = slotDatetime
-      ? new Date(Math.min(slotDatetime.getTime(), Date.now() + 24 * 3_600_000)).toISOString()
-      : new Date(Date.now() + 24 * 3_600_000).toISOString()
+      ? new Date(Math.min(slotDatetime.getTime(), Date.now() + 2 * 3_600_000)).toISOString()
+      : new Date(Date.now() + 2 * 3_600_000).toISOString()
 
     const { error } = await supabase.from('relief_requests').insert({
       reservation_id: reservationId,

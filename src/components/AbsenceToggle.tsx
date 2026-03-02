@@ -139,8 +139,8 @@ export default function AbsenceToggle({ onAbsenceChange }: Props) {
         ? buildSlotDatetime(weekStart, res.slot.day_of_week, res.slot.start_time)
         : null
       const expiresAt = slotDatetime
-        ? new Date(Math.min(slotDatetime.getTime(), Date.now() + 24 * 3_600_000)).toISOString()
-        : new Date(Date.now() + 24 * 3_600_000).toISOString()
+        ? new Date(Math.min(slotDatetime.getTime(), Date.now() + 2 * 3_600_000)).toISOString()
+        : new Date(Date.now() + 2 * 3_600_000).toISOString()
       return {
         reservation_id: res.id,
         slot_id:        res.time_slot_id,

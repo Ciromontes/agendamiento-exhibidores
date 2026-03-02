@@ -149,13 +149,13 @@ export default function GlobalReliefButton() {
     const selectedItems = reservations.filter(r => selected.has(r.id))
 
     const inserts = selectedItems.map(res => {
-      // Expiración = el menor entre: inicio del turno y ahora+24h
+      // Expiración = el menor entre: inicio del turno y ahora+2h
       const slotDatetime = res.slot
         ? buildSlotDatetime(weekStart, res.slot.day_of_week, res.slot.start_time)
         : null
       const expiresAt = slotDatetime
-        ? new Date(Math.min(slotDatetime.getTime(), Date.now() + 24 * 3_600_000)).toISOString()
-        : new Date(Date.now() + 24 * 3_600_000).toISOString()
+        ? new Date(Math.min(slotDatetime.getTime(), Date.now() + 2 * 3_600_000)).toISOString()
+        : new Date(Date.now() + 2 * 3_600_000).toISOString()
 
       return {
         reservation_id: res.id,
