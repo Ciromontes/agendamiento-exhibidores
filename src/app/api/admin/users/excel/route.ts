@@ -220,13 +220,25 @@ export async function POST(req: NextRequest) {
     return key
   }
 
-  // Procesar cada fila
-  const results = {
-    created: 0,
-    updated: 0,
-    skipped: 0,
-    errors: [] as string[],
+  // ═══════════════════════════════════════════════════════════
+  // FASE 1: Validar TODAS las filas antes de tocar la BD
+  // ═══════════════════════════════════════════════════════════
+  type ValidatedRow = {
+    action: 'insert' | 'update'
+    rowNum: number
+    name: string
+    accessKey: string        // '' = no cambiar (solo updates)
+    userType: string
+    gender: string
+    phone: string | null
+    isAdmin: boolean
+    isActive: boolean
+    rowId?: string           // solo para updates
   }
+
+  const validated: ValidatedRow[] = []
+  const errors: string[] = []
+  let skipped = 0
 
   for (let i = 0; i < rows.length; i++) {
     const row = rows[i]
@@ -245,7 +257,7 @@ export async function POST(req: NextRequest) {
 
     // Fila completamente vacía → omitir silenciosamente
     if (!name && !rawKey && !rawType && !rawGender) {
-      results.skipped++
+      skipped++
       continue
     }
 
@@ -257,21 +269,21 @@ export async function POST(req: NextRequest) {
     if (rawAdmin === undefined || rawAdmin === null || rawAdmin === '') missingFields.push('es_admin')
 
     if (missingFields.length > 0) {
-      results.errors.push(`Fila ${rowNum}${name ? ` (${name})` : ''}: faltan campos obligatorios: ${missingFields.join(', ')}.`)
+      errors.push(`Fila ${rowNum}${name ? ` (${name})` : ''}: faltan campos obligatorios: ${missingFields.join(', ')}.`)
       continue
     }
 
     // Resolver tipo de usuario
     const userType = TYPE_REVERSE[rawType] ?? null
     if (!userType || !['publicador', 'precursor_regular', 'precursor_auxiliar'].includes(userType)) {
-      results.errors.push(`Fila ${rowNum} (${name}): tipo de usuario inválido "${rawType}". Usa: Publicador, Precursor Regular o Precursor Auxiliar.`)
+      errors.push(`Fila ${rowNum} (${name}): tipo de usuario inválido "${rawType}". Usa: Publicador, Precursor Regular o Precursor Auxiliar.`)
       continue
     }
 
     // Resolver género (obligatorio)
     const gender = GENDER_REVERSE[rawGender] ?? null
     if (!gender) {
-      results.errors.push(`Fila ${rowNum} (${name}): género inválido "${rawGender}". Usa: Masculino o Femenino.`)
+      errors.push(`Fila ${rowNum} (${name}): género inválido "${rawGender}". Usa: Masculino o Femenino.`)
       continue
     }
 
@@ -281,64 +293,90 @@ export async function POST(req: NextRequest) {
     const isUpdate = rowId && existingIds.has(rowId)
     let accessKey = rawKey
     if (!accessKey && !isUpdate) {
-      // Nuevo usuario sin clave → generar automáticamente
       accessKey = getUniqueKey()
     } else if (!accessKey && isUpdate) {
-      // Update sin clave → no cambiar la existente (se omite del payload)
-      accessKey = '' // marcador para omitir
+      accessKey = '' // marcador para omitir en update
     } else if (accessKey && accessKey.length < 6) {
-      results.errors.push(`Fila ${rowNum} (${name}): la clave de acceso debe tener mínimo 6 caracteres.`)
+      errors.push(`Fila ${rowNum} (${name}): la clave de acceso debe tener mínimo 6 caracteres.`)
       continue
     }
 
-    if (isUpdate) {
-      // ────── UPDATE ──────
+    validated.push({
+      action: isUpdate ? 'update' : 'insert',
+      rowNum,
+      name,
+      accessKey,
+      userType,
+      gender,
+      phone,
+      isAdmin,
+      isActive,
+      ...(isUpdate ? { rowId } : {}),
+    })
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // Si HAY errores de validación → rechazar TODO el archivo
+  // ═══════════════════════════════════════════════════════════
+  if (errors.length > 0) {
+    return NextResponse.json({
+      ok: false,
+      totalRows: rows.length,
+      created: 0,
+      updated: 0,
+      skipped,
+      errors,
+      rejected: true,
+      message: 'El archivo tiene errores. No se guardó ningún cambio. Corrige los errores y vuelve a intentarlo.',
+    }, { status: 422 })
+  }
+
+  // ═══════════════════════════════════════════════════════════
+  // FASE 2: Sin errores → aplicar todos los cambios
+  // ═══════════════════════════════════════════════════════════
+  const results = { created: 0, updated: 0 }
+  const dbErrors: string[] = []
+
+  for (const v of validated) {
+    if (v.action === 'update') {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const updatePayload: Record<string, any> = {
-        name,
-        user_type:  userType,
-        gender,
-        phone,
-        is_admin:   isAdmin,
-        is_active:  isActive,
+        name:       v.name,
+        user_type:  v.userType,
+        gender:     v.gender,
+        phone:      v.phone,
+        is_admin:   v.isAdmin,
+        is_active:  v.isActive,
       }
-      // Solo actualizar access_key si se proporcionó explícitamente
-      if (accessKey) updatePayload.access_key = accessKey
+      if (v.accessKey) updatePayload.access_key = v.accessKey
 
       const { error } = await supabase
         .from('users')
         .update(updatePayload)
-        .eq('id', rowId)
+        .eq('id', v.rowId!)
         .eq('congregation_id', admin.congregation_id)
 
       if (error) {
-        const msg = error.code === '23505'
-          ? `clave de acceso duplicada`
-          : error.message
-        results.errors.push(`Fila ${rowNum} (${name}): ${msg}`)
+        dbErrors.push(`Fila ${v.rowNum} (${v.name}): ${error.code === '23505' ? 'clave de acceso duplicada' : error.message}`)
       } else {
         results.updated++
       }
     } else {
-      // ────── INSERT ──────
       const { error } = await supabase
         .from('users')
         .insert({
-          name,
-          access_key: accessKey,
-          user_type:  userType,
-          gender,
-          phone,
-          is_admin:   isAdmin,
-          is_active:  isActive,
-          congregation_id: admin.congregation_id,
+          name:             v.name,
+          access_key:       v.accessKey,
+          user_type:        v.userType,
+          gender:           v.gender,
+          phone:            v.phone,
+          is_admin:         v.isAdmin,
+          is_active:        v.isActive,
+          congregation_id:  admin.congregation_id,
         })
 
       if (error) {
-        const msg = error.code === '23505'
-          ? `clave de acceso duplicada`
-          : error.message
-        results.errors.push(`Fila ${rowNum} (${name}): ${msg}`)
+        dbErrors.push(`Fila ${v.rowNum} (${v.name}): ${error.code === '23505' ? 'clave de acceso duplicada' : error.message}`)
       } else {
         results.created++
       }
@@ -346,8 +384,10 @@ export async function POST(req: NextRequest) {
   }
 
   return NextResponse.json({
-    ok: true,
+    ok: dbErrors.length === 0,
     totalRows: rows.length,
     ...results,
+    skipped,
+    errors: dbErrors,
   })
 }

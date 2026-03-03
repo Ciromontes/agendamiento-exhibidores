@@ -1,7 +1,8 @@
 /**
  * app/api/admin/users/[id]/route.ts
  * ─────────────────────────────────────────────────────────────
- * PATCH /api/admin/users/[id]  → actualiza un usuario
+ * PATCH  /api/admin/users/[id]  → actualiza un usuario
+ * DELETE /api/admin/users/[id]  → elimina permanentemente un usuario
  *
  * Acepta cualquier subconjunto de campos actualizables:
  *   name, access_key, user_type, gender, is_admin, is_active, phone
@@ -58,5 +59,73 @@ export async function PATCH(
     return NextResponse.json({ ok: true })
   } catch {
     return NextResponse.json({ error: 'Error interno' }, { status: 500 })
+  }
+}
+
+// ─── DELETE — eliminar usuario permanentemente ─────────────────
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const admin = await verifyAdmin(req)
+  if (!admin) return NextResponse.json({ error: 'No autorizado' }, { status: 403 })
+
+  const { id } = await params
+  if (!id) return NextResponse.json({ error: 'ID requerido' }, { status: 400 })
+
+  // No permitir que el admin se elimine a sí mismo
+  if (id === admin.id) {
+    return NextResponse.json({ error: 'No puedes eliminarte a ti mismo.' }, { status: 400 })
+  }
+
+  try {
+    const supabase = createServiceClient()
+
+    // Primero desvincular cónyuge si existe
+    const { data: user } = await supabase
+      .from('users')
+      .select('spouse_id')
+      .eq('id', id)
+      .eq('congregation_id', admin.congregation_id)
+      .single()
+
+    if (!user) {
+      return NextResponse.json({ error: 'Usuario no encontrado.' }, { status: 404 })
+    }
+
+    if (user.spouse_id) {
+      await supabase
+        .from('users')
+        .update({ spouse_id: null })
+        .eq('id', user.spouse_id)
+        .eq('congregation_id', admin.congregation_id)
+    }
+
+    // Eliminar reservaciones del usuario
+    await supabase
+      .from('reservations')
+      .delete()
+      .eq('user_id', id)
+
+    // Eliminar invitaciones del usuario
+    await supabase
+      .from('invitations')
+      .delete()
+      .or(`inviter_id.eq.${id},invitee_id.eq.${id}`)
+
+    // Eliminar el usuario
+    const { error } = await supabase
+      .from('users')
+      .delete()
+      .eq('id', id)
+      .eq('congregation_id', admin.congregation_id)
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 })
+    }
+
+    return NextResponse.json({ ok: true })
+  } catch {
+    return NextResponse.json({ error: 'Error interno al eliminar.' }, { status: 500 })
   }
 }

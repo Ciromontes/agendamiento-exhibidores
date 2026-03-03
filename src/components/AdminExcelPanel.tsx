@@ -24,6 +24,8 @@ type ImportResult = {
   updated: number
   skipped: number
   errors: string[]
+  rejected?: boolean
+  message?: string
 } | null
 
 export default function AdminExcelPanel() {
@@ -96,7 +98,7 @@ export default function AdminExcelPanel() {
 
       const json = await res.json()
 
-      if (!res.ok) {
+      if (!res.ok && res.status !== 422) {
         setError(json.error ?? `Error ${res.status}`)
       } else {
         setResult(json as ImportResult)
@@ -184,6 +186,13 @@ export default function AdminExcelPanel() {
       {result && (
         <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm space-y-3">
           <h3 className="font-semibold text-gray-700">📋 Resultado de la importación</h3>
+
+          {/* Banner de rechazo total */}
+          {result.rejected && (
+            <div className="bg-red-100 border border-red-300 rounded-lg p-4 text-red-800 text-sm font-medium">
+              🚫 {result.message ?? 'El archivo fue rechazado. No se guardó ningún cambio.'}
+            </div>
+          )}
 
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center">
             <div className="bg-gray-50 rounded-lg p-3">

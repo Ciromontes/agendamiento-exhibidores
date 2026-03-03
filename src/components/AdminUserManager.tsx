@@ -90,6 +90,10 @@ export default function AdminUserManager() {
   const [spouseTargetUser, setSpouseTargetUser] = useState<User | null>(null) // Usuario al que vincular
   const [spouseSearch, setSpouseSearch] = useState('')        // Búsqueda en el modal de cónyuge
   const [savingSpouse, setSavingSpouse] = useState(false)     // Guardando vinculación
+  // ─── Estado de selección múltiple ──────────────────────────
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [bulkActionLoading, setBulkActionLoading] = useState(false)
+
   // ─── Claves generadas en esta sesión (ephemeral, solo en memoria) ────────
   // Mapea userId → clave en texto plano recién generada.
   // Se borra al recargar la página para no exponer claves.
@@ -555,6 +559,108 @@ export default function AdminUserManager() {
   }
 
   // =============================================================
+  // Selección múltiple
+  // =============================================================
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filteredUsers.length) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(filteredUsers.map(u => u.id)))
+    }
+  }
+
+  const clearSelection = () => setSelectedIds(new Set())
+
+  // =============================================================
+  // Acciones masivas
+  // =============================================================
+  const handleBulkAction = async (action: 'deactivate' | 'activate' | 'delete') => {
+    const ids = Array.from(selectedIds)
+    if (ids.length === 0) return
+
+    // Confirmar eliminación permanente
+    if (action === 'delete') {
+      const confirmed = confirm(
+        `⚠️ ¿Estás seguro de ELIMINAR PERMANENTEMENTE ${ids.length} usuario(s)?\n\n` +
+        `Esto no se puede deshacer. Se borrarán sus reservaciones, invitaciones y todos sus datos.`
+      )
+      if (!confirmed) return
+    }
+
+    if (action === 'deactivate') {
+      const confirmed = confirm(`¿Desactivar ${ids.length} usuario(s)?`)
+      if (!confirmed) return
+    }
+
+    setBulkActionLoading(true)
+    try {
+      const res = await fetch('/api/admin/users/bulk', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-access-key': currentAdmin?.access_key ?? '',
+        },
+        body: JSON.stringify({ action, ids }),
+      })
+      const json = await res.json()
+
+      if (!res.ok) {
+        setErrorMsg(json.error ?? 'Error en acción masiva.')
+      } else {
+        const labels = { deactivate: 'desactivados', activate: 'activados', delete: 'eliminados' }
+        setSuccessMsg(`${json.affected} usuario(s) ${labels[action]}.`)
+        clearSelection()
+        await fetchUsers()
+      }
+    } catch {
+      setErrorMsg('Error de conexión al ejecutar acción masiva.')
+    }
+    setBulkActionLoading(false)
+  }
+
+  // =============================================================
+  // Eliminar usuario permanentemente (individual)
+  // =============================================================
+  const handleDeleteUser = async (targetUser: User) => {
+    if (targetUser.id === currentAdmin?.id) {
+      setErrorMsg('No puedes eliminarte a ti mismo.')
+      return
+    }
+
+    const confirmed = confirm(
+      `⚠️ ¿ELIMINAR PERMANENTEMENTE a "${targetUser.name}"?\n\n` +
+      `Esto borrará sus reservaciones, invitaciones y todos sus datos. No se puede deshacer.`
+    )
+    if (!confirmed) return
+
+    try {
+      const res = await fetch(`/api/admin/users/${targetUser.id}`, {
+        method: 'DELETE',
+        headers: { 'x-access-key': currentAdmin?.access_key ?? '' },
+      })
+      const json = await res.json()
+
+      if (!res.ok) {
+        setErrorMsg(json.error ?? 'Error al eliminar usuario.')
+      } else {
+        setSuccessMsg(`Usuario "${targetUser.name}" eliminado permanentemente.`)
+        await fetchUsers()
+      }
+    } catch {
+      setErrorMsg('Error de conexión al eliminar.')
+    }
+  }
+
+  // =============================================================
   // Activar / Desactivar usuario
   // =============================================================
   const toggleUserActive = async (targetUser: User) => {
@@ -610,6 +716,46 @@ export default function AdminUserManager() {
       {errorMsg && (
         <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-lg text-sm flex items-center gap-2">
           <span>❌</span> {errorMsg}
+        </div>
+      )}
+
+      {/* ─── Barra de acciones masivas (cuando hay selección) ──── */}
+      {selectedIds.size > 0 && (
+        <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium text-indigo-700">
+              ✓ {selectedIds.size} usuario(s) seleccionado(s)
+            </span>
+            <button
+              onClick={clearSelection}
+              className="text-xs text-indigo-500 hover:text-indigo-700 underline"
+            >
+              Deseleccionar
+            </button>
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            <button
+              onClick={() => handleBulkAction('deactivate')}
+              disabled={bulkActionLoading}
+              className="px-3 py-1.5 text-xs font-medium bg-yellow-100 text-yellow-800 hover:bg-yellow-200 rounded-lg transition disabled:opacity-50"
+            >
+              🚫 Desactivar
+            </button>
+            <button
+              onClick={() => handleBulkAction('activate')}
+              disabled={bulkActionLoading}
+              className="px-3 py-1.5 text-xs font-medium bg-green-100 text-green-800 hover:bg-green-200 rounded-lg transition disabled:opacity-50"
+            >
+              ✅ Activar
+            </button>
+            <button
+              onClick={() => handleBulkAction('delete')}
+              disabled={bulkActionLoading}
+              className="px-3 py-1.5 text-xs font-medium bg-red-100 text-red-800 hover:bg-red-200 rounded-lg transition disabled:opacity-50"
+            >
+              🗑️ Eliminar permanentemente
+            </button>
+          </div>
         </div>
       )}
 
@@ -692,6 +838,15 @@ export default function AdminUserManager() {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 border-b border-gray-200">
+                <th className="px-4 py-3 w-10">
+                  <input
+                    type="checkbox"
+                    checked={filteredUsers.length > 0 && selectedIds.size === filteredUsers.length}
+                    onChange={toggleSelectAll}
+                    className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                    title="Seleccionar todos"
+                  />
+                </th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">Nombre</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">Clave</th>
                 <th className="text-left px-4 py-3 font-medium text-gray-600">Tipo</th>
@@ -706,7 +861,7 @@ export default function AdminUserManager() {
             <tbody className="divide-y divide-gray-100">
               {filteredUsers.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-8 text-center text-gray-400">
+                  <td colSpan={10} className="px-4 py-8 text-center text-gray-400">
                     No se encontraron usuarios.
                   </td>
                 </tr>
@@ -714,8 +869,19 @@ export default function AdminUserManager() {
                 filteredUsers.map(u => (
                   <tr
                     key={u.id}
-                    className={`hover:bg-gray-50 transition ${!u.is_active ? 'opacity-50' : ''}`}
+                    className={`hover:bg-gray-50 transition ${!u.is_active ? 'opacity-50' : ''} ${
+                      selectedIds.has(u.id) ? 'bg-indigo-50/50' : ''
+                    }`}
                   >
+                    {/* Checkbox */}
+                    <td className="px-4 py-3">
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(u.id)}
+                        onChange={() => toggleSelect(u.id)}
+                        className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                      />
+                    </td>
                     {/* Nombre */}
                     <td className="px-4 py-3 font-medium text-gray-800">{u.name}</td>
                     {/* Clave de acceso: muestra texto plano si fue generada en esta sesión, si no parcialmente oculta */}
@@ -856,6 +1022,23 @@ export default function AdminUserManager() {
                         >
                           {u.is_active ? '🚫' : '✅'}
                         </button>
+                        {/* Botón eliminar permanentemente */}
+                        <button
+                          onClick={() => handleDeleteUser(u)}
+                          disabled={u.id === currentAdmin?.id}
+                          className={`p-1.5 rounded-lg transition ${
+                            u.id === currentAdmin?.id
+                              ? 'opacity-30 cursor-not-allowed'
+                              : 'hover:bg-red-50 text-red-600'
+                          }`}
+                          title={
+                            u.id === currentAdmin?.id
+                              ? 'No puedes eliminarte a ti mismo'
+                              : 'Eliminar permanentemente'
+                          }
+                        >
+                          🗑️
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -875,11 +1058,20 @@ export default function AdminUserManager() {
             filteredUsers.map(u => (
               <div
                 key={u.id}
-                className={`p-4 ${!u.is_active ? 'opacity-50' : ''}`}
+                className={`p-4 ${!u.is_active ? 'opacity-50' : ''} ${
+                  selectedIds.has(u.id) ? 'bg-indigo-50/50' : ''
+                }`}
               >
                 {/* Cabecera de la tarjeta: nombre + acciones */}
                 <div className="flex items-start justify-between">
-                  <div>
+                  <div className="flex items-start gap-2">
+                    <input
+                      type="checkbox"
+                      checked={selectedIds.has(u.id)}
+                      onChange={() => toggleSelect(u.id)}
+                      className="h-4 w-4 mt-1 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                    />
+                    <div>
                     <p className="font-medium text-gray-800">{u.name}</p>
                     {/* Clave: muestra plain text si se acaba de generar */}
                     <p className="text-xs text-gray-400 font-mono mt-0.5">
@@ -941,7 +1133,21 @@ export default function AdminUserManager() {
                     >
                       📲
                     </button>
+                    {/* Eliminar permanentemente */}
+                    <button
+                      onClick={() => handleDeleteUser(u)}
+                      disabled={u.id === currentAdmin?.id}
+                      className={`p-1.5 rounded-lg ${
+                        u.id === currentAdmin?.id
+                          ? 'opacity-30 cursor-not-allowed'
+                          : 'hover:bg-red-50 text-red-600'
+                      }`}
+                      title="Eliminar permanentemente"
+                    >
+                      🗑️
+                    </button>
                   </div>
+                </div>
                 </div>
                 {/* Badges en la tarjeta */}
                 <div className="flex flex-wrap gap-2 mt-2">
