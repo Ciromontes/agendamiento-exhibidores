@@ -21,6 +21,7 @@ import AdminWeekReport from '@/components/AdminWeekReport'
 import AdminAbsencePanel from '@/components/AdminAbsencePanel'
 import AdminExhibitorManager from '@/components/AdminExhibitorManager'
 import AdminResetPanel from '@/components/AdminResetPanel'
+import AdminExcelPanel from '@/components/AdminExcelPanel'
 
 type Props = {
   params: Promise<{ slug: string }>
@@ -32,7 +33,7 @@ export default function AdminPage({ params }: Props) {
   const { user, congregationSlug, isLoading, logout } = useUser()
   const router = useRouter()
   const [activeTab, setActiveTab] = useState<
-    'horarios' | 'usuarios' | 'config' | 'reporte' | 'ausentes' | 'exhibidores' | 'reset'
+    'horarios' | 'usuarios' | 'config' | 'reporte' | 'ausentes' | 'exhibidores' | 'excel' | 'reset'
   >('horarios')
 
   // Protección de ruta: solo admins
@@ -141,6 +142,16 @@ export default function AdminPage({ params }: Props) {
             🚫 Ausentes
           </button>
           <button
+            onClick={() => setActiveTab('excel')}
+            className={`px-5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
+              activeTab === 'excel'
+                ? 'bg-white text-indigo-700 shadow-sm'
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            📊 Excel
+          </button>
+          <button
             onClick={() => setActiveTab('reset')}
             className={`px-5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
               activeTab === 'reset'
@@ -160,6 +171,7 @@ export default function AdminPage({ params }: Props) {
         {activeTab === 'config'     && <AdminConfigPanel />}
         {activeTab === 'reporte'    && <AdminWeekReport />}
         {activeTab === 'ausentes'   && <AdminAbsencePanel />}
+        {activeTab === 'excel'      && <AdminExcelPanel />}
         {activeTab === 'reset'      && <AdminResetPanel />}
       </main>
     </div>
