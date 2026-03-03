@@ -122,6 +122,8 @@ export default function AdminExcelPanel() {
         </h2>
         <p className="text-sm text-gray-500 mt-1">
           Descarga el listado actual o sube un archivo Excel para crear y actualizar usuarios en lote.
+          Solo necesitas: <strong>nombre</strong>, <strong>tipo</strong>, <strong>género</strong> y <strong>es_admin</strong>.
+          La clave de acceso se genera automáticamente.
         </p>
       </div>
 
@@ -245,7 +247,7 @@ export default function AdminExcelPanel() {
                 <tr>
                   <td className="py-1 pr-3 font-mono text-xs">id</td>
                   <td className="py-1 pr-3">No</td>
-                  <td className="py-1">UUID del usuario. Si existe → actualizar. Si vacío → crear nuevo.</td>
+                  <td className="py-1">UUID del usuario. Si existe → actualizar. Si vacío → crear nuevo. <strong>No lo llenes para usuarios nuevos.</strong></td>
                 </tr>
                 <tr>
                   <td className="py-1 pr-3 font-mono text-xs">nombre</td>
@@ -254,17 +256,17 @@ export default function AdminExcelPanel() {
                 </tr>
                 <tr>
                   <td className="py-1 pr-3 font-mono text-xs">clave_acceso</td>
-                  <td className="py-1 pr-3 text-red-600">Sí</td>
-                  <td className="py-1">Mínimo 6 caracteres. Debe ser única.</td>
+                  <td className="py-1 pr-3">No</td>
+                  <td className="py-1">Se genera automáticamente si no se proporciona. Mín. 6 caracteres si se llena.</td>
                 </tr>
                 <tr>
                   <td className="py-1 pr-3 font-mono text-xs">tipo</td>
-                  <td className="py-1 pr-3">No</td>
-                  <td className="py-1">Publicador, Precursor Regular o Precursor Auxiliar (por defecto: Publicador)</td>
+                  <td className="py-1 pr-3 text-red-600">Sí</td>
+                  <td className="py-1">Publicador, Precursor Regular o Precursor Auxiliar</td>
                 </tr>
                 <tr>
                   <td className="py-1 pr-3 font-mono text-xs">genero</td>
-                  <td className="py-1 pr-3">No</td>
+                  <td className="py-1 pr-3 text-red-600">Sí</td>
                   <td className="py-1">Masculino o Femenino</td>
                 </tr>
                 <tr>
@@ -274,8 +276,8 @@ export default function AdminExcelPanel() {
                 </tr>
                 <tr>
                   <td className="py-1 pr-3 font-mono text-xs">es_admin</td>
-                  <td className="py-1 pr-3">No</td>
-                  <td className="py-1">Sí o No (por defecto: No)</td>
+                  <td className="py-1 pr-3 text-red-600">Sí</td>
+                  <td className="py-1">Sí o No</td>
                 </tr>
                 <tr>
                   <td className="py-1 pr-3 font-mono text-xs">activo</td>
@@ -289,16 +291,21 @@ export default function AdminExcelPanel() {
           <div>
             <h4 className="font-medium text-gray-700 mb-1">Flujo recomendado:</h4>
             <ol className="list-decimal list-inside space-y-1">
-              <li>Descarga el Excel actual para tener la plantilla con los usuarios existentes.</li>
-              <li>Edita los datos que necesites o agrega filas nuevas (deja la columna <strong>id</strong> vacía para crear).</li>
-              <li>Sube el archivo modificado.</li>
-              <li>Revisa el resultado: verás cuántos se crearon, actualizaron o tuvieron errores.</li>
+              <li>Prepara un Excel con las columnas: <strong>nombre</strong>, <strong>tipo</strong>, <strong>genero</strong>, <strong>es_admin</strong> (mínimo).</li>
+              <li>No te preocupes por el <strong>id</strong> ni la <strong>clave_acceso</strong> — se generan automáticamente.</li>
+              <li>Sube el archivo y revisa el resultado.</li>
+              <li>Después puedes descargar el Excel para ver las claves generadas y compartirlas.</li>
             </ol>
           </div>
 
           <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">
             <strong>⚠️ Importante:</strong> Las filas con <strong>id</strong> existente se actualizarán
-            con los datos del Excel. Verifica bien antes de subir.
+            con los datos del Excel. Para usuarios nuevos, solo llena nombre, tipo, género y es_admin.
+          </div>
+
+          <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+            <strong>💡 Tip:</strong> Después de subir usuarios nuevos, descarga el Excel
+            para obtener las <strong>claves de acceso</strong> generadas y compartirlas con los publicadores.
           </div>
         </div>
       </details>

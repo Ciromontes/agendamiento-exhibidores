@@ -12,7 +12,9 @@
  * Al importar:
  *   - Si la fila tiene "id" válido → UPDATE
  *   - Si "id" está vacío          → INSERT (usuario nuevo)
- *   - Se ignoran filas sin nombre ni clave_acceso
+ *   - Campos obligatorios: nombre, tipo, genero, es_admin
+ *   - clave_acceso se auto-genera si no se proporciona
+ *   - Se ignoran filas completamente vacías
  * ─────────────────────────────────────────────────────────────
  */
 import { NextRequest, NextResponse } from 'next/server'
@@ -56,6 +58,20 @@ const BOOL_REVERSE = (v: string | boolean | number | null | undefined): boolean 
   if (!v) return false
   const s = String(v).toLowerCase().trim()
   return ['sí', 'si', 'yes', 'true', '1'].includes(s)
+}
+
+/**
+ * Genera una clave de acceso única y legible.
+ * Formato: XXXX-NNNN (4 letras + 4 dígitos) = 8 chars → cumple mín 6.
+ */
+function generateAccessKey(): string {
+  const letters = 'ABCDEFGHJKLMNPQRSTUVWXYZ' // sin I, O para evitar confusión
+  const digits  = '0123456789'
+  let key = ''
+  for (let i = 0; i < 4; i++) key += letters[Math.floor(Math.random() * letters.length)]
+  key += '-'
+  for (let i = 0; i < 4; i++) key += digits[Math.floor(Math.random() * digits.length)]
+  return key
 }
 
 // =============================================================
@@ -175,13 +191,34 @@ export async function POST(req: NextRequest) {
 
   const supabase = createServiceClient()
 
-  // Cargar IDs existentes de esta congregación para saber si es update
+  // Cargar IDs y claves existentes de esta congregación
   const { data: existing } = await supabase
     .from('users')
-    .select('id')
+    .select('id, access_key')
     .eq('congregation_id', admin.congregation_id)
 
   const existingIds = new Set((existing ?? []).map(u => u.id))
+  const existingKeys = new Set((existing ?? []).map(u => u.access_key))
+
+  // También cargar todas las claves globales para evitar colisiones
+  const { data: allKeys } = await supabase
+    .from('users')
+    .select('access_key')
+
+  const globalKeys = new Set((allKeys ?? []).map(u => u.access_key))
+
+  /** Genera una clave que no colisione con existentes ni con las generadas en este lote */
+  const usedKeysThisBatch = new Set<string>()
+  const getUniqueKey = (): string => {
+    let key: string
+    let attempts = 0
+    do {
+      key = generateAccessKey()
+      attempts++
+    } while ((globalKeys.has(key) || existingKeys.has(key) || usedKeysThisBatch.has(key)) && attempts < 100)
+    usedKeysThisBatch.add(key)
+    return key
+  }
 
   // Procesar cada fila
   const results = {
@@ -197,62 +234,80 @@ export async function POST(req: NextRequest) {
 
     const rowId       = String(row.id ?? '').trim()
     const name        = String(row.nombre ?? '').trim()
-    const accessKey   = String(row.clave_acceso ?? '').trim()
-    const rawType     = String(row.tipo ?? 'publicador').toLowerCase().trim()
+    const rawKey      = String(row.clave_acceso ?? '').trim()
+    const rawType     = String(row.tipo ?? '').toLowerCase().trim()
     const rawGender   = String(row.genero ?? '').toLowerCase().trim()
     const phone       = String(row.telefono ?? '').replace(/\D/g, '') || null
-    const isAdmin     = BOOL_REVERSE(row.es_admin as string)
+    const rawAdmin    = row.es_admin
     const isActive    = row.activo !== undefined && row.activo !== '' 
       ? BOOL_REVERSE(row.activo as string) 
       : true // por defecto activo para nuevos
 
-    // Validar campos obligatorios
-    if (!name && !accessKey) {
+    // Fila completamente vacía → omitir silenciosamente
+    if (!name && !rawKey && !rawType && !rawGender) {
       results.skipped++
       continue
     }
 
-    if (!name) {
-      results.errors.push(`Fila ${rowNum}: falta el nombre.`)
-      continue
-    }
+    // ── Validar campos obligatorios ──────────────────────────
+    const missingFields: string[] = []
+    if (!name)      missingFields.push('nombre')
+    if (!rawType)   missingFields.push('tipo')
+    if (!rawGender) missingFields.push('genero')
+    if (rawAdmin === undefined || rawAdmin === null || rawAdmin === '') missingFields.push('es_admin')
 
-    if (!accessKey) {
-      results.errors.push(`Fila ${rowNum}: falta la clave de acceso.`)
-      continue
-    }
-
-    if (accessKey.length < 6) {
-      results.errors.push(`Fila ${rowNum} (${name}): la clave debe tener mínimo 6 caracteres.`)
+    if (missingFields.length > 0) {
+      results.errors.push(`Fila ${rowNum}${name ? ` (${name})` : ''}: faltan campos obligatorios: ${missingFields.join(', ')}.`)
       continue
     }
 
     // Resolver tipo de usuario
-    const userType = TYPE_REVERSE[rawType] ?? 'publicador'
-    if (!['publicador', 'precursor_regular', 'precursor_auxiliar'].includes(userType)) {
-      results.errors.push(`Fila ${rowNum} (${name}): tipo de usuario inválido "${rawType}".`)
+    const userType = TYPE_REVERSE[rawType] ?? null
+    if (!userType || !['publicador', 'precursor_regular', 'precursor_auxiliar'].includes(userType)) {
+      results.errors.push(`Fila ${rowNum} (${name}): tipo de usuario inválido "${rawType}". Usa: Publicador, Precursor Regular o Precursor Auxiliar.`)
       continue
     }
 
-    // Resolver género
-    const gender = rawGender ? (GENDER_REVERSE[rawGender] ?? null) : null
+    // Resolver género (obligatorio)
+    const gender = GENDER_REVERSE[rawGender] ?? null
+    if (!gender) {
+      results.errors.push(`Fila ${rowNum} (${name}): género inválido "${rawGender}". Usa: Masculino o Femenino.`)
+      continue
+    }
 
-    // ¿Es update o insert?
+    const isAdmin = BOOL_REVERSE(rawAdmin as string)
+
+    // Clave de acceso: usar la proporcionada o auto-generar
     const isUpdate = rowId && existingIds.has(rowId)
+    let accessKey = rawKey
+    if (!accessKey && !isUpdate) {
+      // Nuevo usuario sin clave → generar automáticamente
+      accessKey = getUniqueKey()
+    } else if (!accessKey && isUpdate) {
+      // Update sin clave → no cambiar la existente (se omite del payload)
+      accessKey = '' // marcador para omitir
+    } else if (accessKey && accessKey.length < 6) {
+      results.errors.push(`Fila ${rowNum} (${name}): la clave de acceso debe tener mínimo 6 caracteres.`)
+      continue
+    }
 
     if (isUpdate) {
       // ────── UPDATE ──────
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const updatePayload: Record<string, any> = {
+        name,
+        user_type:  userType,
+        gender,
+        phone,
+        is_admin:   isAdmin,
+        is_active:  isActive,
+      }
+      // Solo actualizar access_key si se proporcionó explícitamente
+      if (accessKey) updatePayload.access_key = accessKey
+
       const { error } = await supabase
         .from('users')
-        .update({
-          name,
-          access_key: accessKey,
-          user_type:  userType,
-          gender,
-          phone,
-          is_admin:   isAdmin,
-          is_active:  isActive,
-        })
+        .update(updatePayload)
         .eq('id', rowId)
         .eq('congregation_id', admin.congregation_id)
 
