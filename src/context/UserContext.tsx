@@ -20,7 +20,7 @@
  */
 'use client'
 
-import { createContext, useContext, useEffect, useState } from 'react'
+import { createContext, useContext, useEffect, useState, useCallback } from 'react'
 import { User } from '@/types'
 
 // Tipo del contexto: lo que provee el UserProvider
@@ -52,11 +52,19 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     if (storedUser) {
       try {
         // Parsear los datos guardados del usuario
-        setUser(JSON.parse(storedUser))
+        const parsedUser = JSON.parse(storedUser)
+
+        // Validar que el usuario tenga congregation_id (migración a V4 Multi-Tenant)
+        // Si no lo tiene, es una sesión vieja y debemos invalidarla.
+        if (!parsedUser.congregation_id && !parsedUser.is_super_admin) {
+           throw new Error('Usuario legacy sin congregation_id')
+        }
+
+        setUser(parsedUser)
         const storedSlug = localStorage.getItem('exhibidor-congregation-slug')
         if (storedSlug) setCongregationSlug(storedSlug)
       } catch {
-        // Si el JSON está corrupto, limpiar localStorage
+        // Si el JSON está corrupto o es de versión vieja, limpiar localStorage
         localStorage.removeItem('exhibidor-user')
         localStorage.removeItem('exhibidor-congregation-slug')
       }
@@ -69,7 +77,7 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
    * Si newUser es null, limpia localStorage (logout).
    * @deprecated Usar setSession(user, slug) en V4 para que el slug quede guardado.
    */
-  const handleSetUser = (newUser: User | null) => {
+  const handleSetUser = useCallback((newUser: User | null) => {
     setUser(newUser)
     if (newUser) {
       localStorage.setItem('exhibidor-user', JSON.stringify(newUser))
@@ -78,29 +86,29 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       localStorage.removeItem('exhibidor-congregation-slug')
       setCongregationSlug(null)
     }
-  }
+  }, [])
 
   /**
    * setSession - V4: Guarda usuario + slug de congregación.
    * Usar esto en lugar de setUser cuando se hace login con slug.
    */
-  const handleSetSession = (newUser: User, slug: string) => {
+  const handleSetSession = useCallback((newUser: User, slug: string) => {
     setUser(newUser)
     setCongregationSlug(slug)
     localStorage.setItem('exhibidor-user', JSON.stringify(newUser))
     localStorage.setItem('exhibidor-congregation-slug', slug)
-  }
+  }, [])
 
   /**
    * logout - Cierra la sesión del usuario.
    * Limpia el estado y localStorage.
    */
-  const logout = () => {
+  const logout = useCallback(() => {
     setUser(null)
     setCongregationSlug(null)
     localStorage.removeItem('exhibidor-user')
     localStorage.removeItem('exhibidor-congregation-slug')
-  }
+  }, [])
 
   // Proveer el contexto a todos los componentes hijos
   return (

@@ -122,7 +122,7 @@ export default function AbsenceToggle({ onAbsenceChange }: Props) {
     // 1. Registrar ausencia
     const { data: absData, error: absError } = await supabase
       .from('absences')
-      .insert({ user_id: user.id, week_start: weekStart, reason: reason.trim() || null })
+      .insert({ user_id: user.id, week_start: weekStart, reason: reason.trim() || null, congregation_id: user.congregation_id })
       .select('id')
       .single()
 
@@ -149,6 +149,7 @@ export default function AbsenceToggle({ onAbsenceChange }: Props) {
         to_user_id:     null,           // abierto a todos
         status:         'pending',
         expires_at:     expiresAt,
+        congregation_id: user.congregation_id,
       }
     })
 

@@ -20,6 +20,7 @@ export async function GET(req: NextRequest) {
   const { data, error } = await supabase
     .from('users')
     .select('*')
+    .eq('congregation_id', admin.congregation_id)
     .order('name', { ascending: true })
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
@@ -46,6 +47,7 @@ export async function POST(req: NextRequest) {
         is_admin: is_admin ?? false,
         is_active: true,
         phone: phone ? String(phone).replace(/\D/g, '') || null : null,
+        congregation_id: admin.congregation_id,
       })
 
     if (error) {

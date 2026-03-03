@@ -212,6 +212,7 @@ export default function ExhibitorGrid() {
    * Fase 7b: carga invitaciones pendientes del slot (para ⏳) y propias recibidas.
    */
   const loadData = useCallback(async () => {
+    if (!congregationId) return
     const [exhibitorsRes, slotsRes, reservationsRes] = await Promise.all([
       supabase.from('exhibitors').select('*').eq('is_active', true).eq('congregation_id', congregationId).order('name'),
       supabase.from('time_slots').select('*').eq('congregation_id', congregationId),
@@ -219,6 +220,7 @@ export default function ExhibitorGrid() {
         .from('reservations')
         .select('*, user:users(id, name, gender)')
         .eq('week_start', weekStart)
+        .eq('congregation_id', congregationId)
         .neq('status', 'cancelled'),
     ])
 
@@ -311,7 +313,7 @@ export default function ExhibitorGrid() {
 
     setLoading(false)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [weekStart, user?.id])
+  }, [weekStart, user?.id, congregationId])
 
   // ─── Cargar reservas del mes completo (Fase 4) ────────────
   // Solo se ejecuta cuando countingMode es 'monthly'.
@@ -325,6 +327,7 @@ export default function ExhibitorGrid() {
       .from('reservations')
       .select('id, user_id, status')
       .gte('week_start', monthStart)
+      .eq('congregation_id', congregationId)
       .neq('status', 'cancelled')
     if (data) setMonthlyReservations(data as Reservation[])
   // eslint-disable-next-line react-hooks/exhaustive-deps

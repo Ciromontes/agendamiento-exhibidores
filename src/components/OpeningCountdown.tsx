@@ -117,13 +117,15 @@ export default function OpeningCountdown() {
 
   // Cargar config solo una vez
   useEffect(() => {
+    if (!user?.congregation_id) return
     supabase
       .from('app_config')
       .select('*')
+      .eq('congregation_id', user.congregation_id)
       .single()
       .then(({ data }) => { if (data) setConfig(data as AppConfig) })
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [user?.congregation_id])
 
   // Actualizar reloj cada segundo
   useEffect(() => {

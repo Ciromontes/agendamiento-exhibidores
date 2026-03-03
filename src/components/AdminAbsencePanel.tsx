@@ -61,6 +61,7 @@ export default function AdminAbsencePanel() {
   const [removing, setRemoving] = useState<string | null>(null)
 
   const loadAbsences = useCallback(async () => {
+    if (!congregationId) return
     setLoading(true)
 
     // Cargar ausencias de la semana con datos del usuario
@@ -84,6 +85,7 @@ export default function AdminAbsencePanel() {
         .select('from_user_id')
         .in('from_user_id', userIds)
         .eq('week_start', weekStart)
+        .eq('congregation_id', congregationId)
         .eq('status', 'pending')
       relData?.forEach(r => {
         reliefCounts.set(r.from_user_id, (reliefCounts.get(r.from_user_id) ?? 0) + 1)
@@ -93,14 +95,14 @@ export default function AdminAbsencePanel() {
     setAbsences(rows.map(r => ({ ...r, reliefCount: reliefCounts.get(r.user_id) ?? 0 })))
     setLoading(false)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [weekStart])
+  }, [weekStart, congregationId])
 
   useEffect(() => { loadAbsences() }, [loadAbsences])
 
   const handleRemove = async (id: string, userName: string) => {
     if (!confirm(`¿Quitar la ausencia de ${userName}?`)) return
     setRemoving(id)
-    await supabase.from('absences').delete().eq('id', id)
+    await supabase.from('absences').delete().eq('id', id).eq('congregation_id', congregationId)
     setAbsences(prev => prev.filter(a => a.id !== id))
     setRemoving(null)
   }

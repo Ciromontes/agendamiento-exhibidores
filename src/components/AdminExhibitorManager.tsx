@@ -71,6 +71,7 @@ export default function AdminExhibitorManager() {
 
   // ─── Cargar exhibidores con contadores ─────────────────────
   const loadData = useCallback(async () => {
+    if (!congregationId) return
     setLoading(true)
 
     // 1. Todos los exhibidores
@@ -100,6 +101,7 @@ export default function AdminExhibitorManager() {
       .from('reservations')
       .select('time_slot_id, time_slot:time_slots(exhibitor_id)')
       .eq('week_start', weekStart)
+      .eq('congregation_id', congregationId)
       .neq('status', 'cancelled')
 
     const resCounts = new Map<string, number>()
@@ -118,12 +120,17 @@ export default function AdminExhibitorManager() {
     setExhibitors(rows)
     setLoading(false)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [weekStart])
+  }, [weekStart, congregationId])
 
   useEffect(() => { loadData() }, [loadData])
 
   // ─── Crear exhibidor ──────────────────────────────────────
   const handleCreate = async () => {
+    if (!congregationId) {
+      setCreateError('Error: no se detectó la congregación')
+      return
+    }
+
     const trimmed = newName.trim()
     if (trimmed.length < 3) {
       setCreateError('El nombre debe tener al menos 3 caracteres.')
@@ -163,6 +170,7 @@ export default function AdminExhibitorManager() {
       .from('exhibitors')
       .update({ name: trimmed })
       .eq('id', id)
+      .eq('congregation_id', congregationId)
 
     if (error) {
       if (error.code === '23505') {
@@ -190,6 +198,7 @@ export default function AdminExhibitorManager() {
       .from('exhibitors')
       .update({ is_active: !ex.is_active })
       .eq('id', ex.id)
+      .eq('congregation_id', congregationId)
 
     if (error) {
       alert('Error al cambiar estado: ' + error.message)

@@ -47,6 +47,7 @@ export default function ReliefBadge() {
     const { data: config } = await supabase
       .from('app_config')
       .select('counting_mode')
+      .eq('congregation_id', user.congregation_id)
       .limit(1)
       .single()
     const mode = config?.counting_mode ?? 'weekly'

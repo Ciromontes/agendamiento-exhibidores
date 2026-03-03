@@ -29,6 +29,18 @@ export async function POST(
   }
 
   const supabase = createServiceClient()
+
+  // Verificar que ambos usuarios pertenecen a la misma congregación que el admin
+  const { data: users, error: checkError } = await supabase
+    .from('users')
+    .select('id, congregation_id')
+    .in('id', [id, spouse_id])
+    .eq('congregation_id', admin.congregation_id)
+
+  if (checkError || !users || users.length !== 2) {
+    return NextResponse.json({ error: 'Operación no permitida o usuarios no encontrados en esta congregación' }, { status: 403 })
+  }
+
   const { error } = await supabase.rpc('vincular_conyuges', {
     p_user_a: id,
     p_user_b: spouse_id,
@@ -50,6 +62,19 @@ export async function DELETE(
   if (!id) return NextResponse.json({ error: 'ID requerido' }, { status: 400 })
 
   const supabase = createServiceClient()
+
+  // Verificar que el usuario pertenece a la congregación del admin
+  const { data: user, error: checkError } = await supabase
+    .from('users')
+    .select('id, congregation_id')
+    .eq('id', id)
+    .eq('congregation_id', admin.congregation_id)
+    .single()
+
+  if (checkError || !user) {
+    return NextResponse.json({ error: 'Operación no permitida o usuario no encontrado' }, { status: 403 })
+  }
+
   const { error } = await supabase.rpc('desvincular_conyuges', {
     p_user_id: id,
   })

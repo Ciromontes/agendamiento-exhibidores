@@ -42,6 +42,7 @@ export async function POST(
     .from('users')
     .update({ access_key: newKey })
     .eq('id', id)
+    .eq('congregation_id', admin.congregation_id)
 
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })

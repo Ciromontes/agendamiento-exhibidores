@@ -30,7 +30,7 @@ type Props = {
 export default function DashboardPage({ params }: Props) {
   const { slug } = use(params)
 
-  const { user, isLoading, logout } = useUser()
+  const { user, congregationSlug, isLoading, logout } = useUser()
   const router = useRouter()
 
   const [spouseName, setSpouseName] = useState<string | null>(null)
@@ -39,14 +39,21 @@ export default function DashboardPage({ params }: Props) {
 
   // Protección de ruta
   useEffect(() => {
-    if (!isLoading && !user) {
-      router.push(`/${slug}`)
+    if (isLoading) return
+
+    // Redirigir si no hay usuario o hay mezcla de congregaciones
+    if (!user || (slug && congregationSlug && slug !== congregationSlug)) {
+      if (slug && congregationSlug && slug !== congregationSlug) {
+        logout()
+      }
+      return router.push(`/${slug}`)
     }
+    
     // Si es admin, redirigir al panel de admin
-    if (!isLoading && user && user.is_admin) {
+    if (user && user.is_admin) {
       router.push(`/${slug}/admin`)
     }
-  }, [user, isLoading, router, slug])
+  }, [user, congregationSlug, isLoading, router, slug, logout])
 
   // Cargar nombre del cónyuge
   useEffect(() => {

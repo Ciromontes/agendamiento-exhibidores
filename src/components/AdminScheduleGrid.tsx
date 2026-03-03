@@ -86,6 +86,7 @@ export default function AdminScheduleGrid() {
    * loadData - Carga exhibidores y time_slots en paralelo.
    */
   const loadData = useCallback(async () => {
+    if (!congregationId) return
     setLoading(true)
     const [exhibitorsRes, slotsRes] = await Promise.all([
       supabase.from('exhibitors').select('*').eq('is_active', true).eq('congregation_id', congregationId).order('name'),
@@ -101,7 +102,7 @@ export default function AdminScheduleGrid() {
     if (slotsRes.data) setTimeSlots(slotsRes.data)
     setLoading(false)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [congregationId])
 
   useEffect(() => {
     loadData()
@@ -182,7 +183,7 @@ export default function AdminScheduleGrid() {
     }
 
     const updates = slotsToSave.map(slot =>
-      supabase.from('time_slots').update({ is_active: slot.is_active }).eq('id', slot.id)
+      supabase.from('time_slots').update({ is_active: slot.is_active }).eq('id', slot.id).eq('congregation_id', congregationId)
     )
 
     const results = await Promise.all(updates)
@@ -346,6 +347,7 @@ export default function AdminScheduleGrid() {
       p_nueva_hora_inicio: '05:00:00',
       p_exhibitor_id:      isGlobalMode ? null : selectedExhibitor,
       p_global:            isGlobalMode,
+      p_congregation_id:   isGlobalMode ? congregationId : null,
     })
     if (error) {
       alert('Error: ' + error.message)
@@ -372,6 +374,7 @@ export default function AdminScheduleGrid() {
       p_nueva_hora_inicio: dayAdjustForm.newStartTime + ':00',
       p_exhibitor_id:      isGlobalMode ? null : selectedExhibitor,
       p_global:            isGlobalMode,
+      p_congregation_id:   isGlobalMode ? congregationId : null,
     })
     if (error) {
       alert('Error al ajustar horario: ' + error.message)
@@ -402,8 +405,9 @@ export default function AdminScheduleGrid() {
 
     setResetting(true)
     const { data, error } = await supabase.rpc('resetear_horarios_defecto', {
-      p_exhibitor_id: isGlobalMode ? null : selectedExhibitor,
-      p_global:       isGlobalMode,
+      p_exhibitor_id:    isGlobalMode ? null : selectedExhibitor,
+      p_global:          isGlobalMode,
+      p_congregation_id: isGlobalMode ? congregationId : null,
     })
     if (error) {
       alert('Error al restablecer: ' + error.message)

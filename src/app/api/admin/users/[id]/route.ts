@@ -45,6 +45,7 @@ export async function PATCH(
       .from('users')
       .update(payload)
       .eq('id', id)
+      .eq('congregation_id', admin.congregation_id)
 
     if (error) {
       const isDuplicate = error.code === '23505'

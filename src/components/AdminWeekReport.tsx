@@ -60,6 +60,7 @@ export default function AdminWeekReport() {
 
   // ─── Carga de datos ──────────────────────────────────────
   const loadData = useCallback(async () => {
+    if (!congregationId) return
     setLoading(true)
     const [exhibRes, slotRes, resRes] = await Promise.all([
       supabase.from('exhibitors').select('*').eq('is_active', true).eq('congregation_id', congregationId).order('name'),
@@ -68,6 +69,7 @@ export default function AdminWeekReport() {
         .from('reservations')
         .select('*, user:users(id, name)')
         .eq('week_start', weekStart)
+        .eq('congregation_id', congregationId)
         .neq('status', 'cancelled'),
     ])
 
@@ -77,7 +79,7 @@ export default function AdminWeekReport() {
 
     setLoading(false)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [weekStart])
+  }, [weekStart, congregationId])
 
   useEffect(() => { loadData() }, [loadData])
 

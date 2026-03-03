@@ -68,7 +68,7 @@ export default function WeekHistoryPanel() {
 
   // ─── Carga datos de la semana seleccionada ───────────────
   const loadData = useCallback(async () => {
-    if (!selectedWeek || !user) return
+    if (!selectedWeek || !user || !congregationId) return
     setLoading(true)
 
     const [exhibRes, slotRes, resRes] = await Promise.all([
@@ -78,6 +78,7 @@ export default function WeekHistoryPanel() {
         .from('reservations')
         .select('*, user:users(id, name)')
         .eq('week_start', selectedWeek)
+        .eq('congregation_id', congregationId)
         .neq('status', 'cancelled'),
     ])
 
@@ -97,6 +98,7 @@ export default function WeekHistoryPanel() {
       .select('week_start')
       .eq('user_id', user.id)
       .in('week_start', weekValues)
+      .eq('congregation_id', congregationId)
       .neq('status', 'cancelled')
 
     if (statsData) {
@@ -111,7 +113,7 @@ export default function WeekHistoryPanel() {
 
     setLoading(false)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedWeek, user?.id])
+  }, [selectedWeek, user?.id, congregationId])
 
   useEffect(() => { loadData() }, [loadData])
 

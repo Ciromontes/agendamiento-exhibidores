@@ -29,7 +29,7 @@ type Props = {
 export default function AdminPage({ params }: Props) {
   const { slug } = use(params)
 
-  const { user, isLoading, logout } = useUser()
+  const { user, congregationSlug, isLoading, logout } = useUser()
   const router = useRouter()
   const [activeTab, setActiveTab] = useState<
     'horarios' | 'usuarios' | 'config' | 'reporte' | 'ausentes' | 'exhibidores' | 'reset'
@@ -37,10 +37,16 @@ export default function AdminPage({ params }: Props) {
 
   // Protección de ruta: solo admins
   useEffect(() => {
-    if (!isLoading && (!user || !user.is_admin)) {
+    if (isLoading) return
+
+    // Redirigir si no hay usuario, no es admin, o intenta acceder a admin de otra congregación
+    if (!user || !user.is_admin || (slug && congregationSlug && slug !== congregationSlug)) {
+      if (slug && congregationSlug && slug !== congregationSlug) {
+        logout() // Limpiar sesión si intenta cruzar congregaciones
+      }
       router.push(`/${slug}`)
     }
-  }, [user, isLoading, router, slug])
+  }, [user, congregationSlug, isLoading, router, slug])
 
   if (isLoading || !user) {
     return (

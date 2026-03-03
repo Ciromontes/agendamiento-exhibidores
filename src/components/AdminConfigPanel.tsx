@@ -19,6 +19,7 @@
 import { useEffect, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { WEEKLY_LIMITS, MONTHLY_LIMITS, USER_TYPE_LABELS } from '@/types'
+import { useUser } from '@/context/UserContext'
 
 // Tipo: campos de app_config que gestiona este panel
 type ConfigData = {
@@ -45,13 +46,17 @@ export default function AdminConfigPanel() {
   const [prioritySavedMsg, setPrioritySavedMsg] = useState(false)
 
   const supabase = createClient()
+  const { user } = useUser()
+  const congregationId = user?.congregation_id ?? ''
 
   // ─── Cargar configuración actual ───────────────────────────
   useEffect(() => {
     const fetchConfig = async () => {
+      if (!congregationId) return
       const { data, error } = await supabase
         .from('app_config')
         .select('id, counting_mode, priority_enabled, priority_mode, priority_hours_auxiliar, priority_hours_publicador, booking_opens_day, booking_opens_time')
+        .eq('congregation_id', congregationId)
         .limit(1)
         .single()
       if (data && !error) {
@@ -61,7 +66,7 @@ export default function AdminConfigPanel() {
     }
     fetchConfig()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [congregationId])
 
   // ─── Guardar cambio de modo ────────────────────────────────
   const handleModeChange = async (newMode: 'weekly' | 'monthly') => {
@@ -73,6 +78,7 @@ export default function AdminConfigPanel() {
       .from('app_config')
       .update({ counting_mode: newMode })
       .eq('id', config.id)
+      .eq('congregation_id', congregationId)
 
     if (error) {
       alert('Error al guardar: ' + error.message)
@@ -101,6 +107,7 @@ export default function AdminConfigPanel() {
         booking_opens_time:        config.booking_opens_time,
       })
       .eq('id', config.id)
+      .eq('congregation_id', congregationId)
     if (error) {
       alert('Error al guardar: ' + error.message)
     } else {

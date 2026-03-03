@@ -33,14 +33,19 @@ export default function CongregationLoginPage({ params }: Props) {
   const [notFound, setNotFound] = useState(false)
 
   const router = useRouter()
-  const { user, setSession } = useUser()
+  const { user, congregationSlug, setSession } = useUser()
 
   // Si ya está logueado en ESTA congregación, redirigir directamente
   useEffect(() => {
     if (user && user.congregation_id) {
-      router.push(user.is_admin ? `/${slug}/admin` : `/${slug}/dashboard`)
+      if (congregationSlug && congregationSlug !== slug) {
+        // Redirigir a su propia congregación, Opcional: cerrar sesión
+        router.push(user.is_admin ? `/${congregationSlug}/admin` : `/${congregationSlug}/dashboard`)
+      } else {
+        router.push(user.is_admin ? `/${slug}/admin` : `/${slug}/dashboard`)
+      }
     }
-  }, [user, slug, router])
+  }, [user, congregationSlug, slug, router])
 
   // Cargar nombre de la congregación para mostrarlo en el título
   useEffect(() => {
