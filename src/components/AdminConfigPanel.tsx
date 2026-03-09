@@ -24,16 +24,20 @@ import { useUser } from '@/context/UserContext'
 // Tipo: campos de app_config que gestiona este panel
 type ConfigData = {
   id: string
-  // ── Fase 4: conteo ───────────────────────────────────
+  // ── Semana activa ─────────────────────────────
+  active_week_start: string       // 'YYYY-MM-DD' lunes de la semana abierta
+  // ── Fase 4: conteo ──────────────────────────
   counting_mode: 'weekly' | 'monthly'
-  // ── Fase 6: prioridad ───────────────────────────────
+  // ── Fase 6: prioridad ───────────────────────
   priority_enabled: boolean
   priority_mode: 'none' | 'precursor_first' | 'tiered'
   priority_hours_auxiliar: number
   priority_hours_publicador: number
   booking_opens_day: number
-  booking_opens_time: string  // ── Ventana de cancelación ───────────────────────────────
-  cancel_window_minutes: number}
+  booking_opens_time: string
+  // ── Ventana de cancelación ───────────────────────────
+  cancel_window_minutes: number
+}
 
 export default function AdminConfigPanel() {
   // ─── Estado ────────────────────────────────────────────────
@@ -49,6 +53,10 @@ export default function AdminConfigPanel() {
   const [cancelSavedMsg, setCancelSavedMsg] = useState(false)
   // Input manual para ventana de cancelación
   const [cancelManualInput, setCancelManualInput] = useState('')
+  // Estado de guardado de la semana activa
+  const [weekSaving, setWeekSaving] = useState(false)
+  const [weekSavedMsg, setWeekSavedMsg] = useState(false)
+  const [confirmAdvance, setConfirmAdvance] = useState(false)
 
   const supabase = createClient()
   const { user } = useUser()
@@ -60,7 +68,7 @@ export default function AdminConfigPanel() {
       if (!congregationId) return
       const { data, error } = await supabase
         .from('app_config')
-        .select('id, counting_mode, priority_enabled, priority_mode, priority_hours_auxiliar, priority_hours_publicador, booking_opens_day, booking_opens_time, cancel_window_minutes')
+        .select('id, active_week_start, counting_mode, priority_enabled, priority_mode, priority_hours_auxiliar, priority_hours_publicador, booking_opens_day, booking_opens_time, cancel_window_minutes')
         .eq('congregation_id', congregationId)
         .limit(1)
         .single()
@@ -72,7 +80,28 @@ export default function AdminConfigPanel() {
     fetchConfig()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [congregationId])
-
+  // ─── Avanzar semana activa ────────────────────────────────
+  const handleAdvanceWeek = async () => {
+    if (!config) return
+    setWeekSaving(true)
+    const next = new Date(config.active_week_start + 'T12:00:00')
+    next.setDate(next.getDate() + 7)
+    const nextStr = next.toISOString().split('T')[0]
+    const { error } = await supabase
+      .from('app_config')
+      .update({ active_week_start: nextStr })
+      .eq('id', config.id)
+      .eq('congregation_id', congregationId)
+    if (error) {
+      alert('Error al avanzar semana: ' + error.message)
+    } else {
+      setConfig(c => c ? { ...c, active_week_start: nextStr } : c)
+      setWeekSavedMsg(true)
+      setConfirmAdvance(false)
+      setTimeout(() => setWeekSavedMsg(false), 4000)
+    }
+    setWeekSaving(false)
+  }
   // ─── Guardar cambio de modo ────────────────────────────────
   const handleModeChange = async (newMode: 'weekly' | 'monthly') => {
     if (!config) return
@@ -168,8 +197,85 @@ export default function AdminConfigPanel() {
   const currentLimits = config.counting_mode === 'monthly' ? MONTHLY_LIMITS : WEEKLY_LIMITS
   const periodSuffix = config.counting_mode === 'monthly' ? '/mes' : '/semana'
 
+  // ─── Helpers para mostrar la semana activa ─────────────────
+  function fmtWeekRange(weekStart: string) {
+    const start = new Date(weekStart + 'T12:00:00')
+    const end   = new Date(weekStart + 'T12:00:00')
+    end.setDate(end.getDate() + 6)
+    return {
+      full: start.toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }),
+      range: `${start.toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })} – ${end.toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' })}`,
+      nextRange: (() => {
+        const ns = new Date(start); ns.setDate(ns.getDate() + 7)
+        const ne = new Date(ns);    ne.setDate(ne.getDate() + 6)
+        return `${ns.toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })} – ${ne.toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' })}`
+      })(),
+    }
+  }
+  const weekInfo = fmtWeekRange(config.active_week_start)
+
   return (
     <div className="space-y-6">
+
+      {/* ══════════════════════════════════════════════════════
+          SECCIÓN 0: SEMANA ACTIVA
+          ══════════════════════════════════════════════════ */}
+      <div className="bg-white rounded-xl shadow-md p-6">
+        <h2 className="text-lg font-bold text-gray-800 mb-1">📅 Semana Activa de Reservas</h2>
+        <p className="text-sm text-gray-500 mb-5">
+          Controla manualmente para qué semana están abiertas las reservas.
+          Cuando termina una semana, avanza al siguiente período con el botón.
+          Las semanas anteriores quedan guardadas en el historial.
+        </p>
+
+        {/* Semana actual */}
+        <div className="bg-indigo-50 border-2 border-indigo-300 rounded-xl px-5 py-4 mb-5">
+          <p className="text-[11px] font-semibold text-indigo-400 uppercase tracking-wide mb-1">Semana abierta actualmente</p>
+          <p className="text-xl font-bold text-indigo-800 capitalize">{weekInfo.range}</p>
+          <p className="text-xs text-indigo-500 mt-0.5 capitalize">Empieza el {weekInfo.full}</p>
+        </div>
+
+        {/* Confirmación de avance */}
+        {!confirmAdvance ? (
+          <button
+            onClick={() => setConfirmAdvance(true)}
+            className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition shadow-sm"
+          >
+            Abrir siguiente semana →
+          </button>
+        ) : (
+          <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 space-y-3">
+            <p className="text-sm font-semibold text-amber-800">
+              ⚠️ ¿Confirmas abrir la semana del <strong className="capitalize">{weekInfo.nextRange}</strong>?
+            </p>
+            <p className="text-xs text-amber-600">
+              La semana actual ({weekInfo.range}) pasará al historial. Los usuarios verán los turnos de la nueva semana.
+            </p>
+            <div className="flex gap-3">
+              <button
+                onClick={handleAdvanceWeek}
+                disabled={weekSaving}
+                className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 text-white px-5 py-2 rounded-lg text-sm font-semibold transition"
+              >
+                {weekSaving ? 'Guardando...' : '✅ Sí, abrir nueva semana'}
+              </button>
+              <button
+                onClick={() => setConfirmAdvance(false)}
+                className="text-gray-500 hover:text-gray-700 text-sm px-3 py-2"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        )}
+
+        {weekSavedMsg && (
+          <div className="mt-3 bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg px-4 py-2">
+            ✅ Semana avanzada. Los usuarios ya ven los turnos de la nueva semana.
+          </div>
+        )}
+      </div>
+
       {/* Tarjeta principal: Modo de Conteo */}
       <div className="bg-white rounded-xl shadow-md p-6">
         <h2 className="text-lg font-bold text-gray-800 mb-1">⚙️ Modo de Conteo de Turnos</h2>
@@ -325,13 +431,12 @@ export default function AdminConfigPanel() {
           }
         </p>
 
-        {config.priority_enabled && (
-          <div className="space-y-5">
-            {/* Día y hora de apertura semanal */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-semibold text-gray-500 mb-1">
-                  📅 Día de apertura semanal
+        {/* Día y hora de apertura — siempre visible */}
+        <div className="space-y-5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-semibold text-gray-500 mb-1">
+                📅 Día de apertura semanal
                 </label>
                 <select
                   value={config.booking_opens_day}
@@ -362,6 +467,53 @@ export default function AdminConfigPanel() {
               </div>
             </div>
 
+            {/* ── Preview: próxima apertura calculada ───────────── */}
+            {(() => {
+              const [h, m] = config.booking_opens_time.split(':').map(Number)
+              const now = new Date()
+              const base = new Date(now)
+              base.setHours(h, m, 0, 0)
+              let daysUntil = config.booking_opens_day - now.getDay()
+              if (daysUntil < 0) daysUntil += 7
+              if (daysUntil === 0 && now >= base) daysUntil = 7
+              base.setDate(base.getDate() + daysUntil)
+
+              // Lunes de la semana que contiene la apertura (= week_start en reservas)
+              const dow = base.getDay()
+              const daysFromMon = dow === 0 ? 6 : dow - 1
+              const weekMonday = new Date(base)
+              weekMonday.setDate(base.getDate() - daysFromMon)
+
+              const fmtOpening = base.toLocaleDateString('es-CO', {
+                weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+              })
+              const hora = base.toLocaleTimeString('es-CO', {
+                hour: '2-digit', minute: '2-digit', hour12: true,
+              })
+              const fmtWeek = weekMonday.toLocaleDateString('es-CO', {
+                weekday: 'long', day: 'numeric', month: 'long',
+              })
+              const DAYS_ES = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado']
+              const openingDayName = DAYS_ES[config.booking_opens_day]
+
+              return (
+                <div className="bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3">
+                  <p className="text-[11px] font-semibold text-indigo-500 uppercase tracking-wide mb-2">
+                    🗓️ Vista previa — próxima apertura
+                  </p>
+                  <p className="text-sm font-bold text-indigo-800 capitalize">{fmtOpening}</p>
+                  <p className="text-sm text-indigo-600 mt-0.5">a las <strong>{hora}</strong></p>
+                  <p className="text-[11px] text-indigo-400 mt-2">
+                    📋 Al abrir, los usuarios reservarán turnos de la semana del <strong className="text-indigo-500 capitalize">{fmtWeek}</strong>.
+                    Cada {openingDayName} el sistema reinicia — los turnos quedan libres para la nueva semana.
+                  </p>
+                </div>
+              )
+            })()}
+        </div>
+
+        {config.priority_enabled && (
+          <div className="space-y-5">
             {/* Modo de prioridad */}
             <div>
               <label className="block text-xs font-semibold text-gray-500 mb-2">Modo de prioridad</label>

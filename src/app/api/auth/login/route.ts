@@ -27,7 +27,7 @@
  */
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
-import { checkRateLimit } from '@/lib/rate-limit'
+import { checkRateLimit, recordFailure } from '@/lib/rate-limit'
 
 export async function POST(req: NextRequest) {
   // ── Rate limiting por IP ──────────────────────────────────
@@ -88,6 +88,7 @@ export async function POST(req: NextRequest) {
         .single()
 
       if (error || !data) {
+        recordFailure(ip)
         return NextResponse.json(
           { error: 'Clave inválida o usuario inactivo' },
           { status: 401 }
@@ -109,6 +110,7 @@ export async function POST(req: NextRequest) {
       .single()
 
     if (error || !data) {
+      recordFailure(ip)
       return NextResponse.json(
         { error: 'Clave inválida o usuario inactivo' },
         { status: 401 }

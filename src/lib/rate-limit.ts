@@ -4,10 +4,12 @@
  * Rate limiter en memoria para rutas de API de Next.js.
  *
  * Diseño:
+ *   - Solo cuenta intentos FALLIDOS (clave incorrecta).
+ *     Los logins exitosos no consumen cuota.
  *   - Map<ip, { count, resetAt }> en el módulo (persiste entre
  *     requests dentro de la misma instancia serverless).
  *   - Ventana fija: WINDOW_MS por defecto 15 minutos.
- *   - Límite: MAX_REQUESTS intentos por ventana por IP.
+ *   - Límite: MAX_FAILURES intentos fallidos por ventana por IP.
  *
  * Limitaciones conocidas:
  *   - En Vercel, múltiples instancias no comparten estado.
@@ -16,14 +18,14 @@
  *   - Si la función se enfría (cold start) el contador se resetea.
  *     Esto es aceptable: el atacante tampoco acumula intentos.
  *
- * Retorna:
- *   { allowed: true }                        → puede continuar
- *   { allowed: false, retryAfterSec: number } → bloqueado
+ * Uso:
+ *   1. checkRateLimit(ip)   → si blocked, rechaza con 429
+ *   2. recordFailure(ip)    → llamar solo cuando la clave es incorrecta
  * ─────────────────────────────────────────────────────────────
  */
 
 const WINDOW_MS      = 15 * 60 * 1_000  // 15 minutos
-const MAX_REQUESTS   = 10               // máx intentos por ventana
+const MAX_FAILURES   = 10               // máx intentos fallidos por ventana
 
 interface Entry {
   count: number
@@ -47,11 +49,9 @@ export type RateLimitResult =
   | { allowed: false; retryAfterSec: number }
 
 /**
- * checkRateLimit - Verifica si la IP puede hacer una nueva solicitud.
- * Incrementa el contador si está dentro del límite.
- *
- * @param ip  - Dirección IP del cliente (string)
- * @returns   RateLimitResult
+ * checkRateLimit - Verifica si la IP está bloqueada por demasiados fallos.
+ * NO incrementa el contador — solo consulta.
+ * Llama a recordFailure(ip) después de confirmar que la clave es incorrecta.
  */
 export function checkRateLimit(ip: string): RateLimitResult {
   evictExpired()
@@ -59,17 +59,29 @@ export function checkRateLimit(ip: string): RateLimitResult {
   const now = Date.now()
   const entry = store.get(ip)
 
-  if (!entry || now >= entry.resetAt) {
-    // Primera solicitud o ventana expirada → nueva ventana
-    store.set(ip, { count: 1, resetAt: now + WINDOW_MS })
-    return { allowed: true }
-  }
+  if (!entry || now >= entry.resetAt) return { allowed: true }
 
-  if (entry.count >= MAX_REQUESTS) {
+  if (entry.count >= MAX_FAILURES) {
     const retryAfterSec = Math.ceil((entry.resetAt - now) / 1_000)
     return { allowed: false, retryAfterSec }
   }
 
-  entry.count++
   return { allowed: true }
+}
+
+/**
+ * recordFailure - Registra un intento fallido para la IP.
+ * Llamar solo cuando la autenticación falla (clave incorrecta).
+ */
+export function recordFailure(ip: string): void {
+  evictExpired()
+
+  const now = Date.now()
+  const entry = store.get(ip)
+
+  if (!entry || now >= entry.resetAt) {
+    store.set(ip, { count: 1, resetAt: now + WINDOW_MS })
+  } else {
+    entry.count++
+  }
 }

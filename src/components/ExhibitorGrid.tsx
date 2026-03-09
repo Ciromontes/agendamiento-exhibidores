@@ -158,7 +158,7 @@ export default function ExhibitorGrid() {
   const [reliefSending, setReliefSending] = useState(false)
   const [reliefPersonalId, setReliefPersonalId] = useState<string | null>(null)
   const supabase = createClient()
-  const weekStart = getWeekStart()
+  const [weekStart, setWeekStart] = useState(getWeekStart())
   const monthStart = getMonthStart()
 
   // ─── Cargar configuración global (Fase 4 + 6) ───────────────
@@ -167,11 +167,12 @@ export default function ExhibitorGrid() {
     const fetchConfig = async () => {
       const { data } = await supabase
         .from('app_config')
-        .select('counting_mode, priority_enabled, priority_mode, priority_hours_auxiliar, priority_hours_publicador, booking_opens_day, booking_opens_time, cancel_window_minutes')
+        .select('counting_mode, active_week_start, priority_enabled, priority_mode, priority_hours_auxiliar, priority_hours_publicador, booking_opens_day, booking_opens_time, cancel_window_minutes')
         .eq('congregation_id', congregationId)
         .limit(1)
         .single()
       if (data) {
+        if (data.active_week_start) setWeekStart(data.active_week_start as string)
         if (data.counting_mode) setCountingMode(data.counting_mode as 'weekly' | 'monthly')
         if (data.cancel_window_minutes) setCancelWindowMs((data.cancel_window_minutes as number) * 60_000)
         setPriorityConfig({

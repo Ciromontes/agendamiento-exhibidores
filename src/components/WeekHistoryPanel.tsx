@@ -41,15 +41,17 @@ function formatWeekLabel(weekStart: string): string {
   return `${fmt(start)} – ${fmt(end)}`
 }
 
-/** Lista de las últimas HISTORY_WEEKS semanas (excluyendo la actual). */
+/** Genera las últimas N semanas anteriores a `activeWeekStart`. */
 const HISTORY_WEEKS = 12
-const PAST_WEEKS: { label: string; value: string }[] = Array.from(
-  { length: HISTORY_WEEKS },
-  (_, i) => {
-    const val = getWeekStartOffset(i + 1)
+function buildPastWeeks(activeWeekStart: string): { label: string; value: string }[] {
+  const active = new Date(activeWeekStart + 'T12:00:00')
+  return Array.from({ length: HISTORY_WEEKS }, (_, i) => {
+    const d = new Date(active)
+    d.setDate(d.getDate() - (i + 1) * 7)
+    const val = d.toISOString().split('T')[0]
     return { value: val, label: formatWeekLabel(val) }
-  }
-)
+  })
+}
 
 // ─── Componente ──────────────────────────────────────────────
 
@@ -58,13 +60,32 @@ export default function WeekHistoryPanel() {
   const supabase  = createClient()
   const congregationId = user?.congregation_id ?? ''
 
-  const [selectedWeek,      setSelectedWeek]      = useState(PAST_WEEKS[0]?.value ?? '')
+  const [pastWeeks,         setPastWeeks]          = useState<{ label: string; value: string }[]>([])
+  const [selectedWeek,      setSelectedWeek]      = useState('')
   const [exhibitors,        setExhibitors]         = useState<Exhibitor[]>([])
   const [selectedExhibitor, setSelectedExhibitor]  = useState<string | null>(null)
   const [timeSlots,         setTimeSlots]          = useState<TimeSlot[]>([])
   const [reservations,      setReservations]       = useState<Reservation[]>([])
   const [myStats,           setMyStats]            = useState<{ week: string; label: string; count: number }[]>([])
   const [loading,           setLoading]            = useState(true)
+
+  // ─── Cargar semana activa → construir lista de historial ─
+  useEffect(() => {
+    if (!congregationId) return
+    supabase
+      .from('app_config')
+      .select('active_week_start')
+      .eq('congregation_id', congregationId)
+      .limit(1)
+      .single()
+      .then(({ data }) => {
+        const activeWeek = data?.active_week_start ?? getWeekStartOffset(0)
+        const weeks = buildPastWeeks(activeWeek)
+        setPastWeeks(weeks)
+        setSelectedWeek(weeks[0]?.value ?? '')
+      })
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [congregationId])
 
   // ─── Carga datos de la semana seleccionada ───────────────
   const loadData = useCallback(async () => {
@@ -92,7 +113,7 @@ export default function WeekHistoryPanel() {
     if (resRes.data)  setReservations(resRes.data as Reservation[])
 
     // Estadísticas: cuántos turnos tuve en cada semana del historial
-    const weekValues = PAST_WEEKS.map(w => w.value)
+    const weekValues = pastWeeks.map(w => w.value)
     const { data: statsData } = await supabase
       .from('reservations')
       .select('week_start')
@@ -104,7 +125,7 @@ export default function WeekHistoryPanel() {
     if (statsData) {
       const counts = new Map<string, number>()
       statsData.forEach(r => counts.set(r.week_start, (counts.get(r.week_start) ?? 0) + 1))
-      setMyStats(PAST_WEEKS.map(w => ({
+      setMyStats(pastWeeks.map(w => ({
         week:  w.value,
         label: w.label,
         count: counts.get(w.value) ?? 0,
@@ -113,7 +134,7 @@ export default function WeekHistoryPanel() {
 
     setLoading(false)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedWeek, user?.id, congregationId])
+  }, [selectedWeek, user?.id, congregationId, pastWeeks])
 
   useEffect(() => { loadData() }, [loadData])
 
@@ -139,7 +160,7 @@ export default function WeekHistoryPanel() {
   const totalMyTurns = myStats.reduce((s, w) => s + w.count, 0)
   const weeksWithTurns = myStats.filter(w => w.count > 0)
 
-  if (!PAST_WEEKS.length) {
+  if (!pastWeeks.length) {
     return (
       <p className="text-center py-12 text-gray-400">No hay semanas anteriores disponibles.</p>
     )
@@ -156,7 +177,7 @@ export default function WeekHistoryPanel() {
           onChange={e => setSelectedWeek(e.target.value)}
           className="text-sm border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-400 bg-white"
         >
-          {PAST_WEEKS.map(w => (
+          {pastWeeks.map(w => (
             <option key={w.value} value={w.value}>{w.label}</option>
           ))}
         </select>

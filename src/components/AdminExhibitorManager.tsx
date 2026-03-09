@@ -153,7 +153,7 @@ export default function AdminExhibitorManager() {
 
     if (error) {
       if (error.code === '23505') {
-        setCreateError('Ya existe un exhibidor con ese nombre.')
+        setCreateError('Ya existe un exhibidor activo con ese nombre en esta congregación.')
       } else {
         setCreateError('Error al crear: ' + error.message)
       }
@@ -202,7 +202,7 @@ export default function AdminExhibitorManager() {
 
     if (error) {
       if (error.code === '23505') {
-        alert('Ya existe un exhibidor con ese nombre.')
+        alert('Ya existe un exhibidor activo con ese nombre en esta congregación.')
       } else {
         alert('Error al renombrar: ' + error.message)
       }
