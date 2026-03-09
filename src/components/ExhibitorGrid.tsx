@@ -33,7 +33,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useUser } from '@/context/UserContext'
 import {
-  Exhibitor, TimeSlot, Reservation, User, Invitation,
+  Exhibitor, TimeSlot, Reservation, User,
   DAYS_OF_WEEK, DAY_ORDER, WEEKLY_LIMITS, MONTHLY_LIMITS,
   USER_TYPE_LABELS, formatTimeLabel, getMonthStart,
 } from '@/types'
@@ -54,11 +54,11 @@ function getWeekStart(): string {
 }
 
 /**
- * isWithinCancelWindow - Retorna true si la reserva se creó hace menos de 1 hora.
- * Durante esa ventana el usuario puede cancelar directamente sin pedir relevo.
+ * isWithinCancelWindow - Retorna true si la reserva se creó dentro de la ventana
+ * de cancelación configurada por el admin (en milisegundos).
  */
-function isWithinCancelWindow(createdAt: string): boolean {
-  return Date.now() - new Date(createdAt).getTime() < 3_600_000
+function isWithinCancelWindow(createdAt: string, windowMs: number): boolean {
+  return Date.now() - new Date(createdAt).getTime() < windowMs
 }
 
 /**
@@ -90,6 +90,8 @@ export default function ExhibitorGrid() {
   // Modo de conteo: 'weekly' (semanal) o 'monthly' (mensual).
   const [countingMode, setCountingMode] = useState<'weekly' | 'monthly'>('weekly')
   const [monthlyReservations, setMonthlyReservations] = useState<Reservation[]>([])
+  // Ventana de cancelación en ms (configurable por admin, defecto 5 min)
+  const [cancelWindowMs, setCancelWindowMs] = useState(5 * 60_000)
 
   // ─── Estado de prioridad de agendamiento (Fase 6) ──────────
   // Estos valores definen cuándo puede empezar a reservar
@@ -165,12 +167,13 @@ export default function ExhibitorGrid() {
     const fetchConfig = async () => {
       const { data } = await supabase
         .from('app_config')
-        .select('counting_mode, priority_enabled, priority_mode, priority_hours_auxiliar, priority_hours_publicador, booking_opens_day, booking_opens_time')
+        .select('counting_mode, priority_enabled, priority_mode, priority_hours_auxiliar, priority_hours_publicador, booking_opens_day, booking_opens_time, cancel_window_minutes')
         .eq('congregation_id', congregationId)
         .limit(1)
         .single()
       if (data) {
         if (data.counting_mode) setCountingMode(data.counting_mode as 'weekly' | 'monthly')
+        if (data.cancel_window_minutes) setCancelWindowMs((data.cancel_window_minutes as number) * 60_000)
         setPriorityConfig({
           enabled:          data.priority_enabled   ?? false,
           mode:             (data.priority_mode     ?? 'none') as 'none' | 'precursor_first' | 'tiered',
@@ -226,9 +229,9 @@ export default function ExhibitorGrid() {
 
     if (exhibitorsRes.data) {
       setExhibitors(exhibitorsRes.data)
-      if (!selectedExhibitor && exhibitorsRes.data.length > 0) {
-        setSelectedExhibitor(exhibitorsRes.data[0].id)
-      }
+      // Forma funcional: solo asigna si todavía no hay un exhibidor seleccionado
+      // (evita resetear la selección del usuario al recargar datos tras agendar)
+      setSelectedExhibitor(prev => prev || (exhibitorsRes.data![0]?.id ?? ''))
     }
     if (slotsRes.data) setTimeSlots(slotsRes.data)
     if (reservationsRes.data) setReservations(reservationsRes.data as Reservation[])
@@ -528,7 +531,7 @@ export default function ExhibitorGrid() {
       .filter(id => !occupiedIds.has(id))
 
     // Contar reservas activas de esos candidatos en el período actual
-    let reservationCounts = new Map<string, number>()
+    const reservationCounts = new Map<string, number>()
     if (candidateIds.length > 0) {
       const { data: resCounts } = await supabase
         .from('reservations')
@@ -841,7 +844,7 @@ export default function ExhibitorGrid() {
     // Fase 9A: Si el slot está lleno (2/2), el otro ocupante no es el cónyuge,
     // y pasó la ventana de 1h → forzar flujo de relevo en lugar de cancelar.
     const activeInSlot = slotRes.length
-    if (activeInSlot === 2 && !otherIsSpouse && !isWithinCancelWindow(myReservation.created_at)) {
+    if (activeInSlot === 2 && !otherIsSpouse && !isWithinCancelWindow(myReservation.created_at, cancelWindowMs)) {
       await handleOpenReliefModal(myReservation)
       return
     }
@@ -1225,8 +1228,8 @@ export default function ExhibitorGrid() {
                               </button>
                             )
                           }
-                          // Dentro de ventana de 1h o turno de pareja → Cancelar directo
-                          if (isCoupleSlot || isWithinCancelWindow(pos1!.created_at)) {
+                          // Dentro de ventana configurable o turno de pareja → Cancelar directo
+                          if (isCoupleSlot || isWithinCancelWindow(pos1!.created_at, cancelWindowMs)) {
                             return (
                               <button
                                 onClick={() => handleCancel(pos1!.id)}
@@ -1274,8 +1277,8 @@ export default function ExhibitorGrid() {
                               </button>
                             )
                           }
-                          // Dentro de ventana de 1h o turno de pareja → Cancelar directo
-                          if (isCoupleSlot || isWithinCancelWindow(pos2!.created_at)) {
+                          // Dentro de ventana configurable o turno de pareja → Cancelar directo
+                          if (isCoupleSlot || isWithinCancelWindow(pos2!.created_at, cancelWindowMs)) {
                             return (
                               <button
                                 onClick={() => handleCancel(pos2!.id)}

@@ -32,8 +32,8 @@ type ConfigData = {
   priority_hours_auxiliar: number
   priority_hours_publicador: number
   booking_opens_day: number
-  booking_opens_time: string
-}
+  booking_opens_time: string  // ── Ventana de cancelación ───────────────────────────────
+  cancel_window_minutes: number}
 
 export default function AdminConfigPanel() {
   // ─── Estado ────────────────────────────────────────────────
@@ -44,6 +44,11 @@ export default function AdminConfigPanel() {
   // Estado de guardado de la sección de prioridad (Fase 6)
   const [prioritySaving, setPrioritySaving] = useState(false)
   const [prioritySavedMsg, setPrioritySavedMsg] = useState(false)
+  // Estado de guardado de la ventana de cancelación
+  const [cancelSaving, setCancelSaving] = useState(false)
+  const [cancelSavedMsg, setCancelSavedMsg] = useState(false)
+  // Input manual para ventana de cancelación
+  const [cancelManualInput, setCancelManualInput] = useState('')
 
   const supabase = createClient()
   const { user } = useUser()
@@ -55,7 +60,7 @@ export default function AdminConfigPanel() {
       if (!congregationId) return
       const { data, error } = await supabase
         .from('app_config')
-        .select('id, counting_mode, priority_enabled, priority_mode, priority_hours_auxiliar, priority_hours_publicador, booking_opens_day, booking_opens_time')
+        .select('id, counting_mode, priority_enabled, priority_mode, priority_hours_auxiliar, priority_hours_publicador, booking_opens_day, booking_opens_time, cancel_window_minutes')
         .eq('congregation_id', congregationId)
         .limit(1)
         .single()
@@ -90,7 +95,29 @@ export default function AdminConfigPanel() {
     }
     setSaving(false)
   }
-
+  // ─── Guardar ventana de cancelación ───────────────────────────
+  const handleSaveCancelWindow = async () => {
+    if (!config) return
+    const mins = config.cancel_window_minutes
+    if (!mins || mins < 1 || mins > 60) {
+      alert('El valor debe estar entre 1 y 60 minutos.')
+      return
+    }
+    setCancelSaving(true)
+    setCancelSavedMsg(false)
+    const { error } = await supabase
+      .from('app_config')
+      .update({ cancel_window_minutes: mins })
+      .eq('id', config.id)
+      .eq('congregation_id', congregationId)
+    if (error) {
+      alert('Error al guardar: ' + error.message)
+    } else {
+      setCancelSavedMsg(true)
+      setTimeout(() => setCancelSavedMsg(false), 3000)
+    }
+    setCancelSaving(false)
+  }
   // ─── Guardar configuración de prioridad (Fase 6) ──────────────
   const handleSavePriority = async () => {
     if (!config) return
@@ -484,6 +511,80 @@ export default function AdminConfigPanel() {
         día y hora configurados. Cada semana el contador se reinicia automáticamente.
         Si un publicador intenta reservar antes de su ventana, verá un mensaje indicando
         cuándo puede hacerlo.
+      </div>
+
+      {/* ══════════════════════════════════════════════════════
+          SECCIÓN 3: VENTANA DE CANCELACIÓN
+          ══════════════════════════════════════════════════ */}
+      <div className="bg-white rounded-xl shadow-md p-6">
+        <h2 className="text-lg font-bold text-gray-800 mb-1">⏱️ Ventana de Cancelación</h2>
+        <p className="text-sm text-gray-500 mb-5">
+          Tiempo (en minutos) que tiene un usuario para cancelar su reserva
+          directamente tras haberla hecho. Después de ese tiempo solo podrá
+          pedir relevo.
+        </p>
+
+        {/* Presets rápidos */}
+        <div className="flex flex-wrap gap-2 mb-4">
+          {[1, 3, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60].map(min => (
+            <button
+              key={min}
+              onClick={() => {
+                setConfig(c => c ? { ...c, cancel_window_minutes: min } : c)
+                setCancelManualInput('')
+              }}
+              className={`px-3 py-1.5 rounded-lg text-sm font-medium border-2 transition ${
+                config.cancel_window_minutes === min
+                  ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                  : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+              }`}
+            >
+              {min} min
+            </button>
+          ))}
+        </div>
+
+        {/* Input manual */}
+        <div className="flex items-center gap-3 mb-5">
+          <label className="text-xs font-semibold text-gray-500 whitespace-nowrap">O escribe manualmente:</label>
+          <input
+            type="number"
+            min={1} max={60}
+            value={cancelManualInput}
+            onChange={e => {
+              setCancelManualInput(e.target.value)
+              const val = parseInt(e.target.value)
+              if (!isNaN(val) && val >= 1 && val <= 60) {
+                setConfig(c => c ? { ...c, cancel_window_minutes: val } : c)
+              }
+            }}
+            placeholder={String(config.cancel_window_minutes)}
+            className="w-24 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+          />
+          <span className="text-sm text-gray-500">minutos (1–60)</span>
+        </div>
+
+        {/* Valor actual */}
+        <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2 text-sm text-amber-800 mb-5">
+          ⏱️ Ventana actual: <strong>{config.cancel_window_minutes} minuto{config.cancel_window_minutes !== 1 ? 's' : ''}</strong>.
+          Tras ese tiempo, el botón «Cancelar» desaparece y el usuario solo puede pedir relevo.
+        </div>
+
+        {cancelSavedMsg && (
+          <div className="bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg px-4 py-2 mb-4">
+            ✅ Ventana de cancelación actualizada. Los usuarios verán el cambio al recargar.
+          </div>
+        )}
+
+        <div className="flex justify-end">
+          <button
+            onClick={handleSaveCancelWindow}
+            disabled={cancelSaving}
+            className="px-6 py-2.5 text-sm font-semibold text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 transition disabled:opacity-60"
+          >
+            {cancelSaving ? 'Guardando...' : '💾 Guardar ventana'}
+          </button>
+        </div>
       </div>
     </div>
   )
