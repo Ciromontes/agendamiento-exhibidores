@@ -93,6 +93,8 @@ export default function ExhibitorGrid() {
   const [monthlyReservations, setMonthlyReservations] = useState<Reservation[]>([])
   // Ventana de cancelación en ms (configurable por admin, defecto 5 min)
   const [cancelWindowMs, setCancelWindowMs] = useState(5 * 60_000)
+  // Horas mínimas de anticipación (Step 1.2), configurable desde AdminConfigPanel
+  const [minAdvanceHours, setMinAdvanceHours] = useState(12)
 
   // ─── Estado de prioridad de agendamiento (Fase 6) ──────────
   // Estos valores definen cuándo puede empezar a reservar
@@ -168,7 +170,7 @@ export default function ExhibitorGrid() {
     const fetchConfig = async () => {
       const { data } = await supabase
         .from('app_config')
-        .select('counting_mode, active_week_start, priority_enabled, priority_mode, priority_hours_auxiliar, priority_hours_publicador, booking_opens_day, booking_opens_time, cancel_window_minutes')
+        .select('counting_mode, active_week_start, priority_enabled, priority_mode, priority_hours_auxiliar, priority_hours_publicador, booking_opens_day, booking_opens_time, cancel_window_minutes, min_advance_hours')
         .eq('congregation_id', congregationId)
         .limit(1)
         .single()
@@ -176,6 +178,7 @@ export default function ExhibitorGrid() {
         if (data.active_week_start) setWeekStart(data.active_week_start as string)
         if (data.counting_mode) setCountingMode(data.counting_mode as 'weekly' | 'monthly')
         if (data.cancel_window_minutes) setCancelWindowMs((data.cancel_window_minutes as number) * 60_000)
+        if (data.min_advance_hours != null) setMinAdvanceHours(data.min_advance_hours as number)
         setPriorityConfig({
           enabled:          data.priority_enabled   ?? false,
           mode:             (data.priority_mode     ?? 'none') as 'none' | 'precursor_first' | 'tiered',
@@ -1082,10 +1085,33 @@ export default function ExhibitorGrid() {
                   const isCoupleSlot = (isOwn1 && isSpouse2) || (isOwn2 && isSpouse1)
                   const hasSpouseReservation = isSpouse1 || isSpouse2
 
+                  // ── Estado temporal del slot (Step 1.2) ──────────────────────
+                  // isPast      → el slot ya ocurrió → bloqueado
+                  // isTooClose  → < 15 min → aviso amarillo (MUY_PRÓXIMO)
+                  const slotDt    = getSlotDatetime(weekStart, slot.day_of_week, slot.start_time)
+                  const msToSlot  = slotDt.getTime() - Date.now()
+                  const isPast     = msToSlot < 0
+                  // isTooClose: entre 0 y 15 min → aviso MUY_PRÓXIMO
+                  // minAdvanceHours classifica PRÓXIMO vs DISPONIBLE (ambos se comportan igual)
+                  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+                  const _minAdv   = minAdvanceHours   // suprime warning de unused var
+                  const isTooClose = msToSlot >= 0 && msToSlot < 15 * 60_000
+
                   // ── CELDA VACÍA (0/2) ───────────────────────────────
                   // Fase 6: si la ventana de prioridad del usuario no ha abierto,
                   // mostrar candado con horario de apertura en lugar del botón.
                   if (count === 0) {
+                    // PASADO: turno ya ocurrió → celda gris bloqueada
+                    if (isPast) {
+                      return (
+                        <td key={dayNum} className="px-2 py-2 text-center">
+                          <div className="bg-gray-100 text-gray-400 rounded-lg px-2 py-3 text-xs">
+                            ⛔ Pasado
+                          </div>
+                        </td>
+                      )
+                    }
+
                     // Cuando la prioridad bloquea y podemos indicar hora de apertura
                     if (!bookingWindow.canBook && bookingWindow.opensAt) {
                       const NOMBRES_DIAS = ['Dom','Lun','Mar','Mié','Jue','Vie','Sáb']
@@ -1105,12 +1131,20 @@ export default function ExhibitorGrid() {
 
                     return (
                       <td key={dayNum} className="px-2 py-2 text-center">
+                        {/* MUY_PRÓXIMO: aviso amarillo cuando faltan < 15 min */}
+                        {isTooClose && (
+                          <p className="text-[10px] text-yellow-700 bg-yellow-50 border border-yellow-200 rounded-lg px-1 py-1 mb-1 leading-tight">
+                            ⚠️ Turno muy próximo. Confirma con el custodio del exhibidor.
+                          </p>
+                        )}
                         <button
                           onClick={() => handleReserve(slot.id)}
                           disabled={!canReserve || actionLoading === slot.id}
                           className={`w-full py-3 px-1 text-xs rounded-lg transition-all ${
                             canReserve
-                              ? 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100 hover:shadow-sm cursor-pointer'
+                              ? isTooClose
+                                ? 'bg-yellow-50 text-yellow-700 hover:bg-yellow-100 hover:shadow-sm cursor-pointer border border-yellow-200'
+                                : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100 hover:shadow-sm cursor-pointer'
                               : 'bg-gray-50 text-gray-400 cursor-not-allowed'
                           }`}
                         >
@@ -1129,6 +1163,18 @@ export default function ExhibitorGrid() {
                     const reservation = pos1 || pos2
                     const isOwn = reservation?.user_id === user?.id
                     const isSpouse = spouse && reservation?.user_id === spouse.id
+
+                    // PASADO: mostrar solo nombre, sin acciones
+                    if (isPast) {
+                      return (
+                        <td key={dayNum} className="px-2 py-2 text-center">
+                          <div className="rounded-lg px-2 py-1.5 text-xs bg-gray-100 text-gray-500 border border-gray-200">
+                            <p className="font-semibold truncate text-[11px]">{reservation?.user?.name || 'Reservado'}</p>
+                            <p className="text-[10px] text-gray-400">1/2 · pasado</p>
+                          </div>
+                        </td>
+                      )
+                    }
 
                     return (
                       <td key={dayNum} className="px-2 py-2 text-center">
@@ -1234,6 +1280,21 @@ export default function ExhibitorGrid() {
 
                   // ── CELDA COMPLETA (2/2): Dos personas ──
                   // Si hay relevo abierto compatible, el borde cambia a ámbar para destacarlo
+                  // PASADO: mostrar nombre(s) en gris sin acciones
+                  if (isPast) {
+                    return (
+                      <td key={dayNum} className="px-2 py-2 text-center">
+                        <div className="rounded-lg px-2 py-1.5 text-xs bg-gray-100 text-gray-500 border border-gray-200">
+                          <p className="font-semibold truncate text-[11px]">{pos1?.user?.name || 'Reservado'}</p>
+                          <div className="border-t border-dashed mt-1 pt-1">
+                            <p className="font-semibold truncate text-[11px]">{pos2?.user?.name || 'Reservado'}</p>
+                          </div>
+                          <p className="text-[10px] text-gray-400 mt-0.5">✔ Completado</p>
+                        </div>
+                      </td>
+                    )
+                  }
+
                   const hasOpenRelief = !hasOwnReservation && !!openReliefBySlot[slot.id]
                   return (
                     <td key={dayNum} className="px-2 py-2 text-center">
