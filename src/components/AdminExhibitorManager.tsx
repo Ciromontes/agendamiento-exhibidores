@@ -140,11 +140,11 @@ export default function AdminExhibitorManager() {
     setCreating(true)
     setCreateError(null)
 
-    const { error } = await supabase.from('exhibitors').insert({
-      name: trimmed,
-      is_active: true,
-      congregation_id: congregationId,
-    })
+    const { data: newExhibitor, error } = await supabase
+      .from('exhibitors')
+      .insert({ name: trimmed, is_active: true, congregation_id: congregationId })
+      .select('id')
+      .single()
 
     if (error) {
       if (error.code === '23505') {
@@ -153,6 +153,29 @@ export default function AdminExhibitorManager() {
         setCreateError('Error al crear: ' + error.message)
       }
     } else {
+      // Generar horario por defecto: Lun–Sáb, 06:00–18:00 en bloques de 2 h
+      const days = [1, 2, 3, 4, 5, 6]
+      const blocks = [
+        ['06:00:00', '08:00:00'],
+        ['08:00:00', '10:00:00'],
+        ['10:00:00', '12:00:00'],
+        ['12:00:00', '14:00:00'],
+        ['14:00:00', '16:00:00'],
+        ['16:00:00', '18:00:00'],
+      ]
+      const slots = days.flatMap(day =>
+        blocks.map(([start, end]) => ({
+          exhibitor_id: newExhibitor.id,
+          congregation_id: congregationId,
+          day_of_week: day,
+          start_time: start,
+          end_time: end,
+          is_active: true,
+          block_reason: null,
+        }))
+      )
+      await supabase.from('time_slots').insert(slots)
+
       setNewName('')
       setShowCreateForm(false)
       await loadData()
