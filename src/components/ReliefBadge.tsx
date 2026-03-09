@@ -87,15 +87,51 @@ export default function ReliefBadge() {
       .gt('expires_at', nowIso)
 
     if (data) {
-      // Filtrar: dirigidas a mí O abiertas con género compatible
-      const visible = (data as ReliefRequest[]).filter(r => {
-        if (r.to_user_id === user.id) return true  // Personalizado para mí
-        if (r.to_user_id !== null) return false    // Personalizado para otro
-        // Abierto: verificar compatibilidad de género
-        const fromGender = (r.from_user as { gender: string } | undefined)?.gender
-        return fromGender === user.gender
-      })
-      setReliefs(visible)
+      const allData = data as ReliefRequest[]
+      const personalReliefs = allData.filter(r => r.to_user_id === user.id)
+      const openReliefs     = allData.filter(r => r.to_user_id === null)
+
+      // ─── Fix 0.2: Filtro por SLOT, no por género del solicitante ──────────
+      // El filtro anterior comparaba `from_user.gender === user.gender`, lo cual
+      // fallaba cuando el solicitante quedó registrado con género incorrecto (bug 0.1).
+      // Pregunta correcta: "¿puede el usuario actual cubrir este slot?"
+      // → Se verifica compatibilidad con los OTROS ocupantes del slot (no el solicitante,
+      //   que será reemplazado por quien acepte el relevo).
+      let visibleOpen = openReliefs
+
+      if (openReliefs.length > 0) {
+        const openSlotIds = [...new Set(openReliefs.map(r => r.slot_id))]
+
+        // Obtener ocupantes actuales de esos slots en la semana activa
+        const { data: slotRes } = await supabase
+          .from('reservations')
+          .select('time_slot_id, user_id, user:users!reservations_user_id_fkey(id, gender)')
+          .in('time_slot_id', openSlotIds)
+          .eq('week_start', weekStart)
+          .neq('status', 'cancelled')
+
+        type OccupantInfo = { userId: string; gender: string | null }
+        const occupantsBySlot: Record<string, OccupantInfo[]> = {}
+        for (const r of (slotRes ?? []) as { time_slot_id: string; user_id: string; user: { id: string; gender: string } | null }[]) {
+          if (!occupantsBySlot[r.time_slot_id]) occupantsBySlot[r.time_slot_id] = []
+          occupantsBySlot[r.time_slot_id].push({ userId: r.user_id, gender: r.user?.gender ?? null })
+        }
+
+        visibleOpen = openReliefs.filter(r => {
+          const fromUserId = (r.from_user as { id: string } | undefined)?.id ?? r.from_user_id
+          const allOccupants = occupantsBySlot[r.slot_id] ?? []
+          // Excluir al solicitante (su lugar es el que se va a cubrir)
+          const remaining = allOccupants.filter(o => o.userId !== fromUserId)
+
+          if (remaining.length === 0) return true  // Slot quedará vacío → cualquiera puede tomar
+          if (!user.gender) return true             // Sin género definido → permisivo
+
+          // Compatible si todos los que quedan son del mismo género
+          return remaining.every(o => !o.gender || o.gender === user.gender)
+        })
+      }
+
+      setReliefs([...personalReliefs, ...visibleOpen])
     }
     setLoading(false)
   // eslint-disable-next-line react-hooks/exhaustive-deps

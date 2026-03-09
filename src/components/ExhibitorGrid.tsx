@@ -216,7 +216,7 @@ export default function ExhibitorGrid() {
    * Fase 7b: carga invitaciones pendientes del slot (para ⏳) y propias recibidas.
    */
   const loadData = useCallback(async () => {
-    if (!congregationId) return
+    if (!user?.id || !congregationId) { setLoading(false); return }
     const [exhibitorsRes, slotsRes, reservationsRes] = await Promise.all([
       supabase.from('exhibitors').select('*').eq('is_active', true).eq('congregation_id', congregationId).order('name'),
       supabase.from('time_slots').select('*').eq('congregation_id', congregationId),
@@ -360,7 +360,27 @@ export default function ExhibitorGrid() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.spouse_id])
 
+  // ─── Fix PC compartido: limpiar datos stale cuando cambia el usuario ──────
+  // Si el usuario A termina su sesión y entra el usuario B en el mismo dispositivo,
+  // los estados locales quedan con datos de A. Este efecto los borra inmediatamente
+  // cuando cambia user?.id, ANTES de que loadData cargue los datos del nuevo usuario.
+  useEffect(() => {
+    setReservations([])
+    setTimeSlots([])
+    setSelectedExhibitor('')
+    setMonthlyReservations([])
+    setSentInvitations([])
+    setAcceptedInvitationSlots([])
+    setSlotPendingInvitations([])
+    setMyPendingInvitations([])
+    setMyPendingReliefs([])
+    setOpenReliefBySlot({})
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id])
+
   // Carga inicial + suscripción Realtime (Feature 3: escuchar reservas, invitaciones y relevos)
+  // Nota: depende de `loadData` (no de []) para que se re-ejecute cuando cambia el usuario,
+  // recreando el canal Realtime con el contexto actualizado del usuario actual.
   useEffect(() => {
     loadData()
 
@@ -378,7 +398,7 @@ export default function ExhibitorGrid() {
 
     return () => { supabase.removeChannel(channel) }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [loadData])
 
   // ─── Helpers de búsqueda ───────────────────────────────────
 
@@ -760,6 +780,31 @@ export default function ExhibitorGrid() {
       setCoupleModal(slotId)
       setActionLoading(null)
       return
+    }
+
+    // ─ Fix PC compartido: verificar compatibilidad de género consultando BD en tiempo real ─
+    // Este chequeo re-consulta la BD (no el estado local) para evitar que datos stale
+    // de un usuario anterior en el mismo dispositivo pasen la validación por error.
+    if (!slotIsEmpty) {
+      const { data: freshSlotRes } = await supabase
+        .from('reservations')
+        .select('user_id, user:users!reservations_user_id_fkey(id, gender)')
+        .eq('time_slot_id', slotId)
+        .eq('week_start', weekStart)
+        .neq('status', 'cancelled')
+
+      const existing = (freshSlotRes ?? []) as { user_id: string; user: { id: string; gender: string } | null }[]
+      for (const r of existing) {
+        const otherGender = r.user?.gender
+        if (!otherGender || !user.gender) continue
+        const isSpousePartner = spouse?.id === r.user_id
+        if (!isSpousePartner && otherGender !== user.gender) {
+          alert('Este turno ya está ocupado por una persona de diferente género. No es posible compartirlo.')
+          await loadData()
+          setActionLoading(null)
+          return
+        }
+      }
     }
 
     // Insertar reserva del usuario
