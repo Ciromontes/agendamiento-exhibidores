@@ -237,29 +237,62 @@ export default function AdminScheduleGrid() {
       return
     }
     setAddingSaving(true)
+
+    const dayNum   = parseInt(addForm.day)
+    const startSec = addForm.startTime + ':00'
+    const endSec   = addForm.endTime   + ':00'
+
+    // ── 1. Conflicto con slots ACTIVOS o BLOQUEADOS → error claro ──
+    const activeConflicts = timeSlots.filter(s =>
+      s.exhibitor_id === selectedExhibitor &&
+      s.day_of_week  === dayNum &&
+      (s.is_active || !!s.block_reason) &&
+      s.start_time < endSec &&
+      s.end_time   > startSec
+    )
+    if (activeConflicts.length > 0) {
+      const labels = activeConflicts
+        .map(s => formatTimeLabel(s.start_time, s.end_time))
+        .join(', ')
+      setAddingSaving(false)
+      setShowAddModal(false)
+      setMessage({ type: 'error', text: `⚠️ No se puede crear: se solapa con ${labels} (activo/bloqueado).` })
+      return
+    }
+
+    // ── 2. Slots INACTIVOS que se solapan → eliminar antes de crear ─
+    const inactiveConflicts = timeSlots.filter(s =>
+      s.exhibitor_id === selectedExhibitor &&
+      s.day_of_week  === dayNum &&
+      !s.is_active &&
+      !s.block_reason &&
+      s.start_time < endSec &&
+      s.end_time   > startSec
+    )
+    if (inactiveConflicts.length > 0) {
+      const delResults = await Promise.all(
+        inactiveConflicts.map(s =>
+          supabase.from('time_slots').delete().eq('id', s.id).eq('congregation_id', congregationId)
+        )
+      )
+      if (delResults.some(r => r.error)) {
+        setAddingSaving(false)
+        alert('Error al reorganizar horarios inactivos.')
+        return
+      }
+    }
+
+    // ── 3. Crear el nuevo slot ──────────────────────────────────────
     const { error } = await supabase.rpc('crear_time_slot', {
       p_exhibitor_id: selectedExhibitor,
-      p_day_of_week:  parseInt(addForm.day),
-      p_start_time:   addForm.startTime + ':00',
-      p_end_time:     addForm.endTime + ':00',
+      p_day_of_week:  dayNum,
+      p_start_time:   startSec,
+      p_end_time:     endSec,
       p_block_reason: addForm.blockReason.trim() || null,
     })
     if (error) {
-      // Solapamiento con slots existentes → redirigir al ajuste de inicio de día
-      if (error.message.toLowerCase().includes('solapado') || error.message.toLowerCase().includes('constraint')) {
-        setShowAddModal(false)
-        setDayAdjustForm({
-          dayNum: parseInt(addForm.day),
-          newStartTime: addForm.startTime,
-        })
-        setShowDayModal(true)
-        setMessage({
-          type: 'error',
-          text: '⚠️ Ese horario se solapa con bloques existentes. Usa "Ajustar inicio del día" para desplazar todos los bloques a la nueva hora.',
-        })
-      } else {
-        alert('Error: ' + error.message)
-      }
+      setShowAddModal(false)
+      setMessage({ type: 'error', text: '⚠️ Error al crear el bloque: ' + error.message })
     } else {
       setShowAddModal(false)
       setMessage({ type: 'success', text: '✅ Bloque creado correctamente.' })
