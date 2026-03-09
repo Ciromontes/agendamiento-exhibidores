@@ -32,6 +32,7 @@
 import { useEffect, useState, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useUser } from '@/context/UserContext'
+import ActiveWeekBanner from '@/components/ActiveWeekBanner'
 import {
   Exhibitor, TimeSlot, Reservation, User,
   DAYS_OF_WEEK, DAY_ORDER, WEEKLY_LIMITS, MONTHLY_LIMITS,
@@ -938,6 +939,7 @@ export default function ExhibitorGrid() {
 
   return (
     <div>
+      <ActiveWeekBanner />
 
       {/* Barra informativa: turnos usados, tipo de usuario, cónyuge y leyenda */}
       <div className="mb-4 bg-indigo-50 rounded-xl px-4 py-3 flex items-center justify-between flex-wrap gap-2">

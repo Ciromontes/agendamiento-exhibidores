@@ -21,6 +21,7 @@ import NotificationBell from '@/components/NotificationBell'
 import WeekHistoryPanel from '@/components/WeekHistoryPanel'
 import GlobalReliefButton from '@/components/GlobalReliefButton'
 import OpeningCountdown from '@/components/OpeningCountdown'
+import ActiveWeekBanner from '@/components/ActiveWeekBanner'
 import { USER_TYPE_LABELS } from '@/types'
 
 type Props = {
@@ -140,6 +141,7 @@ export default function DashboardPage({ params }: Props) {
             </div>
             <GlobalReliefButton />
             <OpeningCountdown />
+            <ActiveWeekBanner />
             <ExhibitorGrid />
           </>
         ) : (
