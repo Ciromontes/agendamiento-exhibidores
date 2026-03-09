@@ -112,7 +112,7 @@ export default function ReliefBadge() {
 
         type OccupantInfo = { userId: string; gender: string | null }
         const occupantsBySlot: Record<string, OccupantInfo[]> = {}
-        for (const r of (slotRes ?? []) as { time_slot_id: string; user_id: string; user: { id: string; gender: string } | null }[]) {
+        for (const r of (slotRes ?? []) as unknown as { time_slot_id: string; user_id: string; user: { id: string; gender: string } | null }[]) {
           if (!occupantsBySlot[r.time_slot_id]) occupantsBySlot[r.time_slot_id] = []
           occupantsBySlot[r.time_slot_id].push({ userId: r.user_id, gender: r.user?.gender ?? null })
         }

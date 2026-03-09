@@ -793,7 +793,7 @@ export default function ExhibitorGrid() {
         .eq('week_start', weekStart)
         .neq('status', 'cancelled')
 
-      const existing = (freshSlotRes ?? []) as { user_id: string; user: { id: string; gender: string } | null }[]
+      const existing = (freshSlotRes ?? []) as unknown as { user_id: string; user: { id: string; gender: string } | null }[]
       for (const r of existing) {
         const otherGender = r.user?.gender
         if (!otherGender || !user.gender) continue
