@@ -128,29 +128,76 @@ En src/components/ExhibitorGrid.tsx, modifica la lógica de renderizado de celda
 
 ---
 
-### Paso 2.1 — Historia se congela al avanzar semana (el admin decide el momento)
+### Paso 2.1 — Historia se congela al avanzar semana (el admin decide el momento, solo el día correcto)
 
 **Explicación para humanos:**  
-Actualmente el historial usa las semanas del calendario. Con el nuevo sistema, el historial solo se "cierra" cuando el admin toca el botón "Avanzar semana". En ese momento las reservas de la semana que termina quedan en historial read-only. Los usuarios ven la nueva semana vacía en la grilla.
+El historial "se cierra" de dos formas:
+
+1. **Automática:** Cuando llega exactamente el día y hora de apertura configurados (`booking_opens_day` + `booking_opens_time` de `app_config`), el sistema avanza solo: la semana actual pasa a historial read-only y la grilla muestra la nueva semana vacía.
+2. **Manual (admin):** El botón "Avanzar semana" en AdminConfigPanel solo está habilitado el día configurado de apertura (p.ej. viernes). Si el admin lo pulsa antes de ese día, el sistema lo rechaza con un mensaje. Al pulsarlo el viernes (o cualquier día igual al configurado), ocurre lo mismo que la transición automática.
+
+En ambos casos: `active_week_start` pasa a la próxima semana, las reservas de la semana anterior quedan como históricas, y la grilla queda en blanco para agendar la nueva semana.
+
+**Regla de negocio clave:** El avance puede ocurrir **desde el `booking_opens_day` hasta el domingo inclusive** (viernes, sábado o domingo). No puede suceder de lunes a jueves (los días anteriores al día de apertura configurado).
 
 **Prompt para IA:**
 ```
 El campo `active_week_start` en `app_config` ya controla la semana activa (script 31).
 La función `handleAdvanceWeek` en AdminConfigPanel.tsx ya actualiza ese campo.
+Los campos `booking_opens_day` (0=Dom…6=Sáb) y `booking_opens_time` ("HH:MM:SS")
+también existen en `app_config`.
 
-Lo que falta: marcar las reservas como "históricas" cuando se avanza.
-Opción A (recomendada, sin columna extra):
+Cambios a implementar:
+
+── 1. Restricción en AdminConfigPanel.tsx ────────────────────────────────────
+En `handleAdvanceWeek` (antes de hacer el UPDATE):
+  a. Leer `booking_opens_day` del config (0=Dom, 1=Lun, …, 5=Vie, 6=Sáb).
+  b. Obtener `const todayDay = new Date().getDay()` (0=Dom … 6=Sáb).
+  c. Calcular si hoy está en la "ventana de avance":
+       La ventana va desde booking_opens_day hasta el domingo (0) de ese fin de semana.
+       Días permitidos: booking_opens_day, booking_opens_day+1 (Sáb), y 0 (Dom).
+       Ejemplo con viernes (5): permitidos = [5, 6, 0].
+       Lógica:
+         const allowed = [
+           bookingOpensDay % 7,
+           (bookingOpensDay + 1) % 7,
+           (bookingOpensDay + 2) % 7,  // domingo si booking=viernes
+         ]
+         const canAdvance = allowed.includes(todayDay)
+  d. Si !canAdvance → mostrar alert:
+     "El avance de semana solo puede realizarse desde el [día configurado] hasta el domingo.
+      Hoy es [día actual] y aún no ha llegado ese momento."
+     y salir sin hacer cambios.
+  e. Si canAdvance → continuar con el UPDATE existente.
+
+── 2. Avance automático en ExhibitorGrid.tsx ─────────────────────────────────
+Después de cargar el config (fetchConfig), comparar la hora de apertura con la hora actual:
+  a. Construir la fecha/hora de apertura de esta semana:
+       const openingDate = computed from (booking_opens_day + booking_opens_time)
+       (mismo cálculo que ya usa computeBookingWindow)
+  b. Si Date.now() >= openingDate.getTime()  AND  weekStart < expected_new_week_start:
+       - Calcular el `expected_new_week_start`: la semana para la que se debería haber abierto.
+         (lunes siguiente al viernes de apertura = openingDate + 3 días, o según la lógica existente)
+       - Si active_week_start en BD < expected_new_week_start:
+           Hacer UPDATE app_config SET active_week_start = expected_new_week_start
+           y actualizar el estado local setWeekStart(expected_new_week_start).
+     NOTA: solo hacer el UPDATE si el usuario tiene permisos de admin o vía una función RPC pública.
+     Si no se quiere hacer el UPDATE desde el cliente del usuario normal, en cambio:
+       - Mostrar un aviso en la grilla: "El admin debe avanzar la semana. Ya es hora de apertura."
+       - Y bloquear la reserva hasta que active_week_start sea actualizado.
+     (Elegir la opción más segura según el modelo de permisos actual de la app.)
+
+── 3. Opción A para el historial (sin columnas nuevas) ─────────────────────
   - Las reservas son históricas si su `week_start` < `active_week_start`.
-  - En ExhibitorGrid.tsx, solo carga reservas con `week_start = active_week_start`.
-  - WeekHistoryPanel.tsx ya filtra por semanas pasadas — funciona automáticamente.
-  - No se necesitan cambios adicionales a la BD.
+  - ExhibitorGrid.tsx ya filtra con .eq('week_start', weekStart) donde weekStart = active_week_start.
+  - WeekHistoryPanel.tsx debe mostrar solo semanas con week_start < active_week_start (no la actual).
+  - Verificar que WeekHistoryPanel no incluya la semana activa en su lista.
 
-Opción B (más explícita):
-  - Agregar columna `is_historical BOOLEAN DEFAULT false` a reservations.
-  - Al avanzar semana, hacer UPDATE reservations SET is_historical=true WHERE week_start = old_week.
-
-Implementar Opción A (verificar que ExhibitorGrid filtra solo por active_week_start
-y que WeekHistoryPanel solo muestra semanas < active_week_start, no la semana actual).
+── 4. Día de apertura en el banner de AdminConfigPanel ──────────────────────
+  En el botón "Avanzar semana" de AdminConfigPanel:
+  - Si hoy es viernes, sábado o domingo (>= booking_opens_day en el fin de semana) → botón habilitado.
+  - Si hoy es lunes–jueves (antes del día de apertura) → botón deshabilitado (opacity-50 cursor-not-allowed)
+    con tooltip: "Solo disponible desde el [día configurado] hasta el domingo".
 ```
 
 ---

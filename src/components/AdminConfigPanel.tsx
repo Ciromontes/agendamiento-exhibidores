@@ -86,6 +86,18 @@ export default function AdminConfigPanel() {
   // ─── Avanzar semana activa ────────────────────────────────
   const handleAdvanceWeek = async () => {
     if (!config) return
+    // Ventana de avance: solo desde el día configurado hasta el domingo (vie→sáb→dom)
+    const DAY_NAMES = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado']
+    const todayDay = new Date().getDay()
+    const d = config.booking_opens_day
+    const allowed = [d % 7, (d + 1) % 7, (d + 2) % 7]
+    if (!allowed.includes(todayDay)) {
+      alert(
+        `El avance de semana solo puede realizarse desde el ${DAY_NAMES[d]} hasta el domingo.\n` +
+        `Hoy es ${DAY_NAMES[todayDay]} y aún no ha llegado ese momento.`
+      )
+      return
+    }
     setWeekSaving(true)
     const next = new Date(config.active_week_start + 'T12:00:00')
     next.setDate(next.getDate() + 7)
@@ -238,6 +250,13 @@ export default function AdminConfigPanel() {
   }
   const weekInfo = fmtWeekRange(config.active_week_start)
 
+  // ¿Está dentro de la ventana de avance? (vie, sáb o dom)
+  const canAdvanceToday = (() => {
+    const todayDay = new Date().getDay()
+    const d = config.booking_opens_day
+    return [d % 7, (d + 1) % 7, (d + 2) % 7].includes(todayDay)
+  })()
+
   return (
     <div className="space-y-6">
 
@@ -261,12 +280,29 @@ export default function AdminConfigPanel() {
 
         {/* Confirmación de avance */}
         {!confirmAdvance ? (
-          <button
-            onClick={() => setConfirmAdvance(true)}
-            className="w-full sm:w-auto bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-2.5 rounded-xl text-sm font-semibold transition shadow-sm"
-          >
-            Abrir siguiente semana →
-          </button>
+          <div>
+            <button
+              onClick={() => setConfirmAdvance(true)}
+              disabled={!canAdvanceToday}
+              title={!canAdvanceToday
+                ? `Solo disponible desde el ${['domingo','lunes','martes','miércoles','jueves','viernes','sábado'][config.booking_opens_day]} hasta el domingo`
+                : undefined}
+              className={`w-full sm:w-auto px-6 py-2.5 rounded-xl text-sm font-semibold transition shadow-sm ${
+                canAdvanceToday
+                  ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
+                  : 'bg-gray-200 text-gray-400 cursor-not-allowed opacity-60'
+              }`}
+            >
+              Abrir siguiente semana →
+            </button>
+            {!canAdvanceToday && (
+              <p className="mt-2 text-xs text-gray-500">
+                🔒 El avance está disponible desde el{' '}
+                <strong>{['domingo','lunes','martes','miércoles','jueves','viernes','sábado'][config.booking_opens_day]}</strong>{' '}
+                hasta el domingo.
+              </p>
+            )}
+          </div>
         ) : (
           <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 space-y-3">
             <p className="text-sm font-semibold text-amber-800">

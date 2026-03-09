@@ -162,6 +162,7 @@ export default function ExhibitorGrid() {
   const [reliefPersonalId, setReliefPersonalId] = useState<string | null>(null)
   const supabase = createClient()
   const [weekStart, setWeekStart] = useState(getWeekStart())
+  const [weekNeedsAdvance, setWeekNeedsAdvance] = useState(false)
   const monthStart = getMonthStart()
 
   // ─── Cargar configuración global (Fase 4 + 6) ───────────────
@@ -187,6 +188,25 @@ export default function ExhibitorGrid() {
           bookingOpensDow:  data.booking_opens_day  ?? 1,
           bookingOpensTime: data.booking_opens_time ?? '08:00:00',
         })
+        // ─ Detectar si la semana activa ya debió haber avanzado ─────────────
+        const bookDow  = (data.booking_opens_day  ?? 5) as number
+        const bookTime = (data.booking_opens_time ?? '15:00:00') as string
+        const now      = new Date()
+        const diffDays = (now.getDay() - bookDow + 7) % 7
+        const lastOpen = new Date(now)
+        lastOpen.setDate(now.getDate() - diffDays)
+        const [bHH, bMM] = bookTime.split(':')
+        lastOpen.setHours(parseInt(bHH), parseInt(bMM), 0, 0)
+        // Si la apertura calculada está en el futuro, retroceder una semana
+        if (now < lastOpen) lastOpen.setDate(lastOpen.getDate() - 7)
+        // Lunes siguiente al día de apertura
+        const daysToMon = ((8 - bookDow) % 7) || 7
+        const expectedNext = new Date(lastOpen)
+        expectedNext.setDate(lastOpen.getDate() + daysToMon)
+        const expectedNextStr = expectedNext.toISOString().split('T')[0]
+        if (now >= lastOpen && (data.active_week_start as string) < expectedNextStr) {
+          setWeekNeedsAdvance(true)
+        }
       }
     }
     fetchConfig()
@@ -944,7 +964,16 @@ export default function ExhibitorGrid() {
     <div>
       <ActiveWeekBanner />
 
-      {/* Barra informativa: turnos usados, tipo de usuario, cónyuge y leyenda */}
+      {/* Aviso: el admin debe avanzar la semana (Step 2.1) */}
+      {weekNeedsAdvance && (
+        <div className="mb-3 flex items-start gap-2 bg-amber-50 border border-amber-300 text-amber-800 text-sm rounded-xl px-4 py-3">
+          <span className="text-base mt-0.5">&#9888;&#65039;</span>
+          <span>
+            Ya es hora de abrir la nueva semana.{' '}
+            <strong>El administrador debe avanzar la semana</strong> desde el panel de configuración.
+          </span>
+        </div>
+      )}
       <div className="mb-4 bg-indigo-50 rounded-xl px-4 py-3 flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-3 flex-wrap">
           <span className="text-sm text-indigo-700">
