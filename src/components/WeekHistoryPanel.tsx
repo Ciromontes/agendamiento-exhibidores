@@ -72,7 +72,7 @@ export default function WeekHistoryPanel() {
     setLoading(true)
 
     const [exhibRes, slotRes, resRes] = await Promise.all([
-      supabase.from('exhibitors').select('*').eq('congregation_id', congregationId).eq('is_active', true).order('name'),
+      supabase.from('exhibitors').select('*').eq('congregation_id', congregationId).order('name'),
       supabase.from('time_slots').select('*').eq('congregation_id', congregationId),
       supabase
         .from('reservations')
@@ -176,6 +176,11 @@ export default function WeekHistoryPanel() {
               }`}
             >
               {ex.name}
+              {ex.deleted_at && (
+                <span className="ml-1.5 text-[9px] bg-red-100 text-red-500 px-1.5 py-0.5 rounded-full font-medium align-middle">
+                  eliminado
+                </span>
+              )}
             </button>
           ))}
         </div>

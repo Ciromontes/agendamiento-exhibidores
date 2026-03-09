@@ -53,6 +53,7 @@ export type Exhibitor = {
   is_active: boolean           // Si está habilitado para reservas
   congregation_id: string      // V4: A qué congregación pertenece
   created_at: string           // Fecha de creación
+  deleted_at: string | null    // Soft delete: fecha de eliminación, null si existe
 }
 
 // ─── Tipo: Bloque Horario ────────────────────────────────────

@@ -61,6 +61,10 @@ export default function AdminExhibitorManager() {
   const [confirmToggleId, setConfirmToggleId] = useState<string | null>(null)
   const [toggling, setToggling] = useState(false)
 
+  // Confirmación de eliminación permanente
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
+
   // Filtro de visualización
   const [showInactive, setShowInactive] = useState(false)
 
@@ -79,6 +83,7 @@ export default function AdminExhibitorManager() {
       .from('exhibitors')
       .select('*')
       .eq('congregation_id', congregationId)
+      .is('deleted_at', null)
       .order('name')
 
     if (!exhData) { setLoading(false); return }
@@ -230,6 +235,24 @@ export default function AdminExhibitorManager() {
       await loadData()
     }
     setToggling(false)
+  }
+
+  // ─── Eliminar exhibidor (soft delete) ────────────────────
+  const handleDelete = async (id: string) => {
+    setDeleting(true)
+    const { error } = await supabase
+      .from('exhibitors')
+      .update({ deleted_at: new Date().toISOString(), is_active: false })
+      .eq('id', id)
+      .eq('congregation_id', congregationId)
+
+    if (error) {
+      alert('Error al eliminar: ' + error.message)
+    } else {
+      setConfirmDeleteId(null)
+      await loadData()
+    }
+    setDeleting(false)
   }
 
   // ─── Filtro de exhibidores visibles ───────────────────────
@@ -445,6 +468,14 @@ export default function AdminExhibitorManager() {
                   >
                     {ex.is_active ? '🔴' : '🟢'}
                   </button>
+                  {/* Eliminar */}
+                  <button
+                    onClick={() => setConfirmDeleteId(ex.id)}
+                    className="p-2 text-gray-400 hover:text-red-700 hover:bg-red-50 rounded-lg transition"
+                    title="Eliminar exhibidor permanentemente"
+                  >
+                    🗑️
+                  </button>
                 </div>
               </div>
 
@@ -464,6 +495,29 @@ export default function AdminExhibitorManager() {
                   </button>
                   <button
                     onClick={() => setConfirmToggleId(null)}
+                    className="text-gray-500 hover:text-gray-700 text-xs px-2 py-1.5"
+                  >
+                    Cancelar
+                  </button>
+                </div>
+              )}
+              {/* Barra de confirmación de eliminación */}
+              {confirmDeleteId === ex.id && (
+                <div className="bg-red-50 border-t border-red-200 px-4 py-3 flex items-center gap-3">
+                  <span className="text-xs text-red-700 flex-1">
+                    ⚠️ <strong>Eliminar permanentemente.</strong> El exhibidor desaparecerá del sistema
+                    pero el historial de reservas anteriores se conserva.
+                    Esta acción no se puede deshacer.
+                  </span>
+                  <button
+                    onClick={() => handleDelete(ex.id)}
+                    disabled={deleting}
+                    className="bg-red-700 hover:bg-red-800 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition"
+                  >
+                    {deleting ? '...' : 'Sí, eliminar'}
+                  </button>
+                  <button
+                    onClick={() => setConfirmDeleteId(null)}
                     className="text-gray-500 hover:text-gray-700 text-xs px-2 py-1.5"
                   >
                     Cancelar
