@@ -41,6 +41,8 @@ type ConfigData = {
   // ── Step 3.1: límites de relevos por mes ──────────────
   relief_limit_publicador: number
   relief_limit_precursor: number
+  // ── Compensación última semana del mes ───────────────
+  last_week_compensation: boolean
 }
 
 export default function AdminConfigPanel() {
@@ -67,6 +69,9 @@ export default function AdminConfigPanel() {
   // Estado de guardado de límites de relevos por mes (Step 3.1)
   const [reliefLimitSaving, setReliefLimitSaving] = useState(false)
   const [reliefLimitSavedMsg, setReliefLimitSavedMsg] = useState(false)
+  // Estado de guardado de compensación de última semana
+  const [compensationSaving, setCompensationSaving] = useState(false)
+  const [compensationSavedMsg, setCompensationSavedMsg] = useState(false)
 
   const supabase = createClient()
   const { user } = useUser()
@@ -78,7 +83,7 @@ export default function AdminConfigPanel() {
       if (!congregationId) return
       const { data, error } = await supabase
         .from('app_config')
-        .select('id, active_week_start, counting_mode, priority_enabled, priority_mode, priority_hours_auxiliar, priority_hours_publicador, booking_opens_day, booking_opens_time, cancel_window_minutes, min_advance_hours, relief_limit_publicador, relief_limit_precursor')
+        .select('id, active_week_start, counting_mode, priority_enabled, priority_mode, priority_hours_auxiliar, priority_hours_publicador, booking_opens_day, booking_opens_time, cancel_window_minutes, min_advance_hours, relief_limit_publicador, relief_limit_precursor, last_week_compensation')
         .eq('congregation_id', congregationId)
         .limit(1)
         .single()
@@ -214,6 +219,25 @@ export default function AdminConfigPanel() {
       setTimeout(() => setPrioritySavedMsg(false), 3000)
     }
     setPrioritySaving(false)
+  }
+
+  // ─── Guardar compensación de última semana ───────────────────
+  const handleSaveLastWeekCompensation = async () => {
+    if (!config) return
+    setCompensationSaving(true)
+    setCompensationSavedMsg(false)
+    const { error } = await supabase
+      .from('app_config')
+      .update({ last_week_compensation: config.last_week_compensation })
+      .eq('id', config.id)
+      .eq('congregation_id', congregationId)
+    if (error) {
+      alert('Error al guardar: ' + error.message)
+    } else {
+      setCompensationSavedMsg(true)
+      setTimeout(() => setCompensationSavedMsg(false), 3000)
+    }
+    setCompensationSaving(false)
   }
 
   // ─── Guardar límites de relevos por mes (Step 3.1) ──────────
@@ -486,6 +510,64 @@ export default function AdminConfigPanel() {
           </table>
         </div>
       </div>
+
+      {/* ── Compensación de última semana — solo visible en modo semanal ── */}
+      {config.counting_mode === 'weekly' && (
+        <div className="bg-white rounded-xl border border-indigo-100 shadow-sm p-5 mt-2">
+          <div className="flex items-start justify-between gap-4 mb-3">
+            <div>
+              <h3 className="text-sm font-bold text-gray-800">📅 Compensación en última semana del mes</h3>
+              <p className="text-xs text-gray-500 mt-1">
+                Cuando está activa, en la última semana del mes los usuarios pueden agendar
+                más turnos para compensar los que no usaron. El límite semanal se reemplaza
+                por la cuota mensual restante.
+              </p>
+            </div>
+            <button
+              onClick={() => setConfig(c => c ? { ...c, last_week_compensation: !c.last_week_compensation } : c)}
+              aria-label="Activar o desactivar compensación de última semana"
+              className={`relative flex-shrink-0 w-12 h-6 rounded-full transition-colors ${
+                config.last_week_compensation ? 'bg-indigo-500' : 'bg-gray-300'
+              }`}
+            >
+              <span className={`absolute top-1 w-4 h-4 rounded-full bg-white shadow transition-all ${
+                config.last_week_compensation ? 'left-7' : 'left-1'
+              }`} />
+            </button>
+          </div>
+
+          {config.last_week_compensation ? (
+            <div className="bg-indigo-50 border border-indigo-200 rounded-lg px-3 py-2 text-xs text-indigo-800 mb-3">
+              ✅ <strong>Activo.</strong> En la última semana del mes:<br />
+              <span className="text-indigo-600">
+                Publicador: hasta 4 turnos · Precursor Regular: hasta 8 · Precursor Auxiliar: hasta 6
+              </span>
+              <br />
+              <span className="text-indigo-500">Solo se cuentan los turnos ya tomados ese mes.</span>
+            </div>
+          ) : (
+            <div className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-xs text-gray-500 mb-3">
+              ⬜ Desactivado — límite semanal normal aplica toda la semana.
+            </div>
+          )}
+
+          {compensationSavedMsg && (
+            <div className="bg-green-50 border border-green-200 text-green-700 text-xs rounded-lg px-3 py-2 mb-3">
+              ✅ Compensación guardada. Los usuarios verán el cambio al recargar.
+            </div>
+          )}
+
+          <div className="flex justify-end">
+            <button
+              onClick={handleSaveLastWeekCompensation}
+              disabled={compensationSaving}
+              className="px-4 py-2 text-sm font-semibold text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 transition disabled:opacity-60"
+            >
+              {compensationSaving ? 'Guardando...' : '💾 Guardar compensación'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Nota informativa — modo de conteo */}
       <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 text-sm text-amber-800">

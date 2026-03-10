@@ -37,6 +37,7 @@ import {
   Exhibitor, TimeSlot, Reservation, User,
   DAYS_OF_WEEK, DAY_ORDER, WEEKLY_LIMITS, MONTHLY_LIMITS,
   USER_TYPE_LABELS, formatTimeLabel, getMonthStart,
+  isLastWeekOfMonth, getMonthStartFromWeek,
 } from '@/types'
 
 // Sin props externas en esta fase
@@ -91,6 +92,9 @@ export default function ExhibitorGrid() {
   // Modo de conteo: 'weekly' (semanal) o 'monthly' (mensual).
   const [countingMode, setCountingMode] = useState<'weekly' | 'monthly'>('weekly')
   const [monthlyReservations, setMonthlyReservations] = useState<Reservation[]>([])
+  // Compensación de última semana: cuando está activa, en la última
+  // semana del mes el límite semanal se reemplaza por la cuota mensual.
+  const [lastWeekCompensation, setLastWeekCompensation] = useState(false)
   // Ventana de cancelación en ms (configurable por admin, defecto 5 min)
   const [cancelWindowMs, setCancelWindowMs] = useState(5 * 60_000)
   // Horas mínimas de anticipación (Step 1.2), configurable desde AdminConfigPanel
@@ -171,7 +175,7 @@ export default function ExhibitorGrid() {
     const fetchConfig = async () => {
       const { data } = await supabase
         .from('app_config')
-        .select('counting_mode, active_week_start, priority_enabled, priority_mode, priority_hours_auxiliar, priority_hours_publicador, booking_opens_day, booking_opens_time, cancel_window_minutes, min_advance_hours')
+        .select('counting_mode, active_week_start, priority_enabled, priority_mode, priority_hours_auxiliar, priority_hours_publicador, booking_opens_day, booking_opens_time, cancel_window_minutes, min_advance_hours, last_week_compensation')
         .eq('congregation_id', congregationId)
         .limit(1)
         .single()
@@ -180,6 +184,7 @@ export default function ExhibitorGrid() {
         if (data.counting_mode) setCountingMode(data.counting_mode as 'weekly' | 'monthly')
         if (data.cancel_window_minutes) setCancelWindowMs((data.cancel_window_minutes as number) * 60_000)
         if (data.min_advance_hours != null) setMinAdvanceHours(data.min_advance_hours as number)
+        if (data.last_week_compensation != null) setLastWeekCompensation(data.last_week_compensation as boolean)
         setPriorityConfig({
           enabled:          data.priority_enabled   ?? false,
           mode:             (data.priority_mode     ?? 'none') as 'none' | 'precursor_first' | 'tiered',
@@ -343,23 +348,30 @@ export default function ExhibitorGrid() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [weekStart, user?.id, congregationId])
 
-  // ─── Cargar reservas del mes completo (Fase 4) ────────────
-  // Solo se ejecuta cuando countingMode es 'monthly'.
-  // Consulta todas las reservas del mes actual para el conteo.
+  // ─── Cargar reservas del mes completo (Fase 4 + compensación) ──
+  // Se ejecuta en modo mensual O cuando la compensación está activa
+  // (mode semanal + última semana del mes + last_week_compensation=true).
   const loadMonthlyReservations = useCallback(async () => {
-    if (countingMode !== 'monthly') {
+    const compensationActiveNow =
+      countingMode === 'weekly' && lastWeekCompensation && isLastWeekOfMonth(weekStart)
+    if (countingMode !== 'monthly' && !compensationActiveNow) {
       setMonthlyReservations([])
       return
     }
+    // Usar el mes del weekStart, no de hoy, para manejar correctamente
+    // semanas que cruzan el fin de mes (ej: semana del 30 Mar – 5 Apr).
+    const monthStartStr = countingMode === 'monthly'
+      ? monthStart
+      : getMonthStartFromWeek(weekStart)
     const { data } = await supabase
       .from('reservations')
       .select('id, user_id, status')
-      .gte('week_start', monthStart)
+      .gte('week_start', monthStartStr)
       .eq('congregation_id', congregationId)
       .neq('status', 'cancelled')
     if (data) setMonthlyReservations(data as Reservation[])
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [countingMode, monthStart])
+  }, [countingMode, lastWeekCompensation, weekStart, monthStart])
 
   // Recargar reservas mensuales cuando cambia el modo o al montar
   useEffect(() => {
@@ -399,7 +411,6 @@ export default function ExhibitorGrid() {
     setMyPendingInvitations([])
     setMyPendingReliefs([])
     setOpenReliefBySlot({})
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id])
 
   // Carga inicial + suscripción Realtime (Feature 3: escuchar reservas, invitaciones y relevos)
@@ -437,13 +448,29 @@ export default function ExhibitorGrid() {
   const getSlotReservations = (slotId: string) =>
     reservations.filter(r => r.time_slot_id === slotId && r.status !== 'cancelled')
 
-  // ─── Contadores y límites (Fase 4: semanal o mensual) ───────
+  // ─── Contadores y límites (Fase 4 + compensación de última semana) ─
+  // isCompensationActive: modo semanal + compensación habilitada +
+  //   esta semana es la última del mes. Cuando es true, se usan los
+  //   MONTHLY_LIMITS contra el total del mes (= mismo comportamiento
+  //   que modo mensual, pero SOLO en la última semana).
+  const isCompensationActive =
+    countingMode === 'weekly' && lastWeekCompensation && isLastWeekOfMonth(weekStart)
+
   // Fuente de reservas para el conteo según el modo:
-  //   - weekly:  reservations (ya filtradas por weekStart en loadData)
-  //   - monthly: monthlyReservations (todas las del mes)
-  const countSource = countingMode === 'monthly' ? monthlyReservations : reservations
-  const limitsTable = countingMode === 'monthly' ? MONTHLY_LIMITS : WEEKLY_LIMITS
-  const periodLabel = countingMode === 'monthly' ? 'este mes' : 'esta semana'
+  //   - weekly normal:    reservations (solo esta semana)
+  //   - monthly:          monthlyReservations (todo el mes)
+  //   - weekly+compens.:  monthlyReservations (todo el mes, techo mensual)
+  const countSource = (countingMode === 'monthly' || isCompensationActive)
+    ? monthlyReservations
+    : reservations
+  const limitsTable = (countingMode === 'monthly' || isCompensationActive)
+    ? MONTHLY_LIMITS
+    : WEEKLY_LIMITS
+  const periodLabel = countingMode === 'monthly'
+    ? 'este mes'
+    : isCompensationActive
+      ? 'este mes (compensación)'
+      : 'esta semana'
 
   const userReservationCount = countSource.filter(
     r => r.user_id === user?.id && r.status !== 'cancelled'

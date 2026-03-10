@@ -256,6 +256,26 @@ export function getMonthStart(): string {
   return firstDay.toISOString().split('T')[0]
 }
 
+// ─── Helper: Inicio del mes de una semana dada ───────────────
+// Retorna 'YYYY-MM-01' para el mes que contiene weekStart.
+// Más robusto que getMonthStart() cuando la semana activa
+// cruza un cambio de mes (ej.: semana del 30 Mar → Apr 5).
+export function getMonthStartFromWeek(weekStart: string): string {
+  const d = new Date(weekStart + 'T12:00:00')
+  return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split('T')[0]
+}
+
+// ─── Helper: ¿Es la última semana del mes? ───────────────────
+// Retorna true si el próximo lunes (weekStart + 7 días) cae en
+// un mes diferente al weekStart. Ejemplo: semana del 30 Mar,
+// siguiente lunes = 6 Apr → true (última semana de marzo).
+export function isLastWeekOfMonth(weekStart: string): boolean {
+  const monday    = new Date(weekStart + 'T12:00:00')
+  const nextMon   = new Date(monday)
+  nextMon.setDate(monday.getDate() + 7)
+  return nextMon.getMonth() !== monday.getMonth()
+}
+
 // ─── Helper: Formatear hora para mostrar en la grilla ────────
 // Convierte 'HH:mm:ss' a formato legible (ej: '6:00 AM')
 export function formatHour(time: string): string {
