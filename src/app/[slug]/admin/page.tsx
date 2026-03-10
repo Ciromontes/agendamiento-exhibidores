@@ -22,6 +22,7 @@ import AdminAbsencePanel from '@/components/AdminAbsencePanel'
 import AdminExhibitorManager from '@/components/AdminExhibitorManager'
 import AdminResetPanel from '@/components/AdminResetPanel'
 import AdminExcelPanel from '@/components/AdminExcelPanel'
+import AdminHistoryPanel from '@/components/AdminHistoryPanel'
 
 type Props = {
   params: Promise<{ slug: string }>
@@ -33,7 +34,7 @@ export default function AdminPage({ params }: Props) {
   const { user, congregationSlug, isLoading, logout } = useUser()
   const router = useRouter()
   const [activeTab, setActiveTab] = useState<
-    'horarios' | 'usuarios' | 'config' | 'reporte' | 'ausentes' | 'exhibidores' | 'excel' | 'reset'
+    'horarios' | 'usuarios' | 'config' | 'reporte' | 'ausentes' | 'exhibidores' | 'excel' | 'reset' | 'historial'
   >('horarios')
 
   // Protección de ruta: solo admins
@@ -152,6 +153,16 @@ export default function AdminPage({ params }: Props) {
             📊 Excel
           </button>
           <button
+            onClick={() => setActiveTab('historial')}
+            className={`px-5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
+              activeTab === 'historial'
+                ? 'bg-white text-indigo-700 shadow-sm'
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            📜 Historial
+          </button>
+          <button
             onClick={() => setActiveTab('reset')}
             className={`px-5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
               activeTab === 'reset'
@@ -173,6 +184,7 @@ export default function AdminPage({ params }: Props) {
         {activeTab === 'ausentes'   && <AdminAbsencePanel />}
         {activeTab === 'excel'      && <AdminExcelPanel />}
         {activeTab === 'reset'      && <AdminResetPanel />}
+        {activeTab === 'historial'  && <AdminHistoryPanel />}
       </main>
     </div>
   )
