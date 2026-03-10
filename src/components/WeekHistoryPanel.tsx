@@ -20,6 +20,23 @@ import { useUser } from '@/context/UserContext'
 import { DAYS_OF_WEEK, formatTimeLabel } from '@/types'
 import type { Exhibitor, TimeSlot, Reservation } from '@/types'
 
+// ─── Tipos locales ───────────────────────────────────────────
+
+type ReliefRow = {
+  id: string
+  reservation_id: string
+  from_user_id: string
+  acceptor_id: string | null
+  status: string
+  acceptor:  { name: string } | { name: string }[] | null
+  from_user: { name: string } | { name: string }[] | null
+}
+
+function getRelName(field: { name: string } | { name: string }[] | null): string | null {
+  if (!field) return null
+  return Array.isArray(field) ? (field[0]?.name ?? null) : field.name
+}
+
 // ─── Helpers de fecha ────────────────────────────────────────
 
 /** Devuelve el lunes de hace `offsetWeeks` semanas (formato 'YYYY-MM-DD'). */
@@ -67,6 +84,7 @@ export default function WeekHistoryPanel() {
   const [timeSlots,         setTimeSlots]          = useState<TimeSlot[]>([])
   const [reservations,      setReservations]       = useState<Reservation[]>([])
   const [myStats,           setMyStats]            = useState<{ week: string; label: string; count: number }[]>([])
+  const [myReliefs,         setMyReliefs]          = useState<ReliefRow[]>([])
   const [loading,           setLoading]            = useState(true)
 
   // ─── Cargar semana activa → construir lista de historial ─
@@ -92,7 +110,7 @@ export default function WeekHistoryPanel() {
     if (!selectedWeek || !user || !congregationId) return
     setLoading(true)
 
-    const [exhibRes, slotRes, resRes] = await Promise.all([
+    const [exhibRes, slotRes, resRes, reliefRes] = await Promise.all([
       supabase.from('exhibitors').select('*').eq('congregation_id', congregationId).order('name'),
       supabase.from('time_slots').select('*').eq('congregation_id', congregationId),
       supabase
@@ -101,6 +119,12 @@ export default function WeekHistoryPanel() {
         .eq('week_start', selectedWeek)
         .eq('congregation_id', congregationId)
         .neq('status', 'cancelled'),
+      supabase
+        .from('relief_requests')
+        .select('id, reservation_id, from_user_id, acceptor_id, status, acceptor:users!acceptor_id(name), from_user:users!from_user_id(name)')
+        .eq('week_start', selectedWeek)
+        .eq('congregation_id', congregationId)
+        .or(`from_user_id.eq.${user.id},acceptor_id.eq.${user.id}`),
     ])
 
     if (exhibRes.data) {
@@ -111,6 +135,7 @@ export default function WeekHistoryPanel() {
     }
     if (slotRes.data) setTimeSlots(slotRes.data)
     if (resRes.data)  setReservations(resRes.data as Reservation[])
+    if (reliefRes.data) setMyReliefs(reliefRes.data as unknown as ReliefRow[])
 
     // Estadísticas: cuántos turnos tuve en cada semana del historial
     const weekValues = pastWeeks.map(w => w.value)
@@ -139,6 +164,37 @@ export default function WeekHistoryPanel() {
   useEffect(() => { loadData() }, [loadData])
 
   // ─── Derivados ───────────────────────────────────────────
+
+  /** Exhibidores visibles: activos siempre + eliminados solo si tienen datos esta semana. */
+  const exhibitorsToShow = exhibitors.filter(ex => {
+    if (!ex.deleted_at) return true
+    return reservations.some(r => {
+      const slot = timeSlots.find(s => s.id === r.time_slot_id)
+      return slot?.exhibitor_id === ex.id
+    })
+  })
+
+  /** Mis turnos en la semana seleccionada con compañero/a y relevo. */
+  const myWeekTurns = !user ? [] : reservations
+    .filter(r => r.user_id === user.id)
+    .map(r => {
+      const slot = timeSlots.find(s => s.id === r.time_slot_id)
+      const ex   = exhibitors.find(e => e.id === slot?.exhibitor_id)
+      const comp = reservations.find(c => c.time_slot_id === r.time_slot_id && c.user_id !== user.id)
+      const rel  = myReliefs.find(rel => rel.reservation_id === r.id && rel.status === 'accepted')
+      return {
+        id:            r.id,
+        exhibitorName: ex?.name ?? '—',
+        day:           slot?.day_of_week ?? 0,
+        timeLabel:     slot ? formatTimeLabel(slot.start_time, slot.end_time) : '',
+        companion:     (comp?.user as { name: string } | undefined)?.name ?? null,
+        relievedBy:    rel ? getRelName(rel.acceptor) : null,
+      }
+    })
+    .sort((a, b) => a.day - b.day || a.timeLabel.localeCompare(b.timeLabel))
+
+  /** Relevos que acepté esta semana (cubrí el turno de otro). */
+  const acceptedByMe = myReliefs.filter(r => r.acceptor_id === user?.id && r.status === 'accepted')
 
   /** Slots del exhibidor seleccionado, agrupados por día. */
   const slotsByDay: Map<number, TimeSlot[]> = new Map()
@@ -186,7 +242,7 @@ export default function WeekHistoryPanel() {
       {/* ── Tabs de exhibidores ── */}
       <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">
         <div className="flex overflow-x-auto border-b border-gray-100 bg-gray-50">
-          {exhibitors.map(ex => (
+          {exhibitorsToShow.map(ex => (
             <button
               key={ex.id}
               onClick={() => setSelectedExhibitor(ex.id)}
@@ -244,19 +300,36 @@ export default function WeekHistoryPanel() {
                         {slotRes.length === 0 ? (
                           <p className="text-xs text-gray-300 italic">— vacío —</p>
                         ) : (
-                          <div className="flex flex-col gap-0.5">
-                            {slotRes.map(r => (
-                              <span
-                                key={r.id}
-                                className={`text-xs px-2 py-0.5 rounded-full w-fit ${
-                                  r.user_id === user?.id
-                                    ? 'bg-indigo-100 text-indigo-700 font-semibold'
-                                    : 'bg-gray-100 text-gray-600'
-                                }`}
-                              >
-                                {(r.user as { name: string } | undefined)?.name ?? 'Desconocido'}
-                              </span>
-                            ))}
+                          <div className="flex flex-col gap-1">
+                            {slotRes.map(r => {
+                              const isMe  = r.user_id === user?.id
+                              const relief = isMe
+                                ? myReliefs.find(rel => rel.reservation_id === r.id && rel.status === 'accepted')
+                                : null
+                              const slotCompanion = slotRes.find(c => c.user_id !== r.user_id)
+                              const companionName = isMe && slotCompanion
+                                ? (slotCompanion.user as { name: string } | undefined)?.name ?? null
+                                : null
+                              return (
+                                <div key={r.id} className="flex flex-col gap-0.5">
+                                  <span className={`text-xs px-2 py-0.5 rounded-full w-fit ${
+                                    isMe
+                                      ? 'bg-indigo-100 text-indigo-700 font-semibold'
+                                      : 'bg-gray-100 text-gray-600'
+                                  }`}>
+                                    {(r.user as { name: string } | undefined)?.name ?? 'Desconocido'}
+                                    {isMe && companionName && (
+                                      <span className="ml-1 font-normal text-indigo-400">· con {companionName}</span>
+                                    )}
+                                  </span>
+                                  {relief && (
+                                    <span className="text-[9px] bg-purple-50 text-purple-600 px-2 py-0.5 rounded-full w-fit">
+                                      🔄 relevado por {getRelName(relief.acceptor) ?? '?'}
+                                    </span>
+                                  )}
+                                </div>
+                              )
+                            })}
                           </div>
                         )}
                       </div>
@@ -283,13 +356,60 @@ export default function WeekHistoryPanel() {
         ) : (
           <div className="flex flex-wrap gap-2">
             {weeksWithTurns.map(w => (
-              <span
+              <button
                 key={w.week}
-                className="text-xs bg-indigo-50 text-indigo-700 px-2.5 py-1 rounded-full border border-indigo-100"
+                onClick={() => setSelectedWeek(w.week)}
+                className={`text-xs px-2.5 py-1 rounded-full border transition ${
+                  w.week === selectedWeek
+                    ? 'bg-indigo-600 text-white border-indigo-600'
+                    : 'bg-indigo-50 text-indigo-700 border-indigo-100 hover:bg-indigo-100'
+                }`}
               >
                 {w.label}: <strong>{w.count}</strong>
-              </span>
+              </button>
             ))}
+          </div>
+        )}
+
+        {/* ── Detalle de mis turnos en la semana visualizada ── */}
+        {myWeekTurns.length > 0 && (
+          <div className="mt-3 pt-3 border-t border-gray-100">
+            <p className="text-xs font-semibold text-gray-500 mb-2">Semana seleccionada — tus turnos:</p>
+            <div className="space-y-2">
+              {myWeekTurns.map(t => (
+                <div key={t.id} className="flex flex-wrap items-center gap-1.5 text-xs">
+                  <span className="font-semibold text-gray-700">{t.exhibitorName}</span>
+                  <span className="text-gray-300">·</span>
+                  <span className="text-gray-600">{DAYS_OF_WEEK[t.day]}</span>
+                  <span className="text-gray-300">·</span>
+                  <span className="text-gray-500">{t.timeLabel}</span>
+                  {t.companion && (
+                    <span className="bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded-full">
+                      con {t.companion}
+                    </span>
+                  )}
+                  {t.relievedBy && (
+                    <span className="bg-purple-50 text-purple-600 px-1.5 py-0.5 rounded-full">
+                      🔄 relevado por {t.relievedBy}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* ── Relevos aceptados esta semana ── */}
+        {acceptedByMe.length > 0 && (
+          <div className="mt-3 pt-3 border-t border-gray-100">
+            <p className="text-xs font-semibold text-gray-500 mb-2">Relevos que cubriste esta semana:</p>
+            <div className="flex flex-wrap gap-2">
+              {acceptedByMe.map(r => (
+                <span key={r.id} className="text-xs bg-teal-50 text-teal-700 px-2.5 py-1 rounded-full border border-teal-100">
+                  ✔️ Relevaste a {getRelName(r.from_user) ?? '?'}
+                </span>
+              ))}
+            </div>
           </div>
         )}
       </div>
