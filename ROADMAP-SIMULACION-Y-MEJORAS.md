@@ -264,30 +264,70 @@ Crea src/components/AdminHistoryMatrix.tsx:
 
 ---
 
-### Paso 3.1 — Máximo de relevos aceptados por mes
+### Paso 3.1 — Máximo de relevos aceptados por mes (configurable por el admin)
 
 **Explicación para humanos:**  
-Actualmente cualquier usuario puede aceptar relevos sin límite. Ahora: publicadores = 1 relevo aceptado por mes, precursores auxiliares y regulares = 2 relevos aceptados por mes. Esto aplica a cuando *aceptan* un relevo, no cuando lo piden.
+Actualmente cualquier usuario puede aceptar relevos sin límite. Ahora el admin define cuántos relevos puede aceptar cada tipo de usuario por mes:
+- **Por defecto:** publicadores = 1 relevo/mes, precursores (aux + regular) = 2 relevos/mes.
+- **El admin puede subir ese límite** hasta un máximo configurable (ej. precursores hasta 4/mes, publicadores hasta 3/mes).
+- El límite aplica solo a cuando *aceptan* un relevo, no a cuando lo piden.
 
 **Prompt para IA:**
 ```
-1. Crea el script database/33_relief_monthly_limits.sql:
-   - No requiere nueva columna: se cuenta desde la tabla relief_requests
-     WHERE status='accepted' AND acceptor_id = user.id AND accepted_at >= inicio del mes.
+── 1. Script SQL: database/33_relief_monthly_limits.sql ─────────────────────
+Agregar columnas a app_config para guardar los límites configurables:
+  ALTER TABLE public.app_config
+    ADD COLUMN IF NOT EXISTS relief_limit_publicador   INT DEFAULT 1,
+    ADD COLUMN IF NOT EXISTS relief_limit_precursor    INT DEFAULT 2;
+  -- Nota: no se necesitan columnas extra en relief_requests.
+  -- El conteo se hace con: WHERE status='accepted' AND acceptor_id = x
+  --   AND accepted_at >= date_trunc('month', CURRENT_DATE)
 
-2. En la función RPC `accept_relief_request` (o donde se procesa la aceptación en Supabase):
-   Antes de marcar como 'accepted', cuenta cuántos relevos ha aceptado el acceptor este mes:
-     SELECT COUNT(*) FROM relief_requests
-     WHERE acceptor_id = p_acceptor_id
-       AND status = 'accepted'
-       AND accepted_at >= date_trunc('month', CURRENT_DATE)
-   Si count >= límite_del_tipo (1 para publicador, 2 para precursor), retornar error
-   'Has alcanzado el límite de relevos que puedes aceptar este mes.'
+── 2. Función RPC `accept_relief_request` en Supabase ───────────────────────
+Antes de marcar la solicitud como 'accepted':
+  a. Leer de app_config los límites:
+       SELECT relief_limit_publicador, relief_limit_precursor
+       FROM app_config WHERE congregation_id = p_congregation_id LIMIT 1
+  b. Leer el user_type del acceptor:
+       SELECT user_type FROM users WHERE id = p_acceptor_id
+  c. Determinar su límite:
+       IF user_type IN ('precursor_auxiliar', 'precursor_regular') THEN
+         lim := relief_limit_precursor
+       ELSE
+         lim := relief_limit_publicador
+       END IF
+  d. Contar relevos aceptados este mes:
+       SELECT COUNT(*) FROM relief_requests
+       WHERE acceptor_id = p_acceptor_id
+         AND status = 'accepted'
+         AND accepted_at >= date_trunc('month', CURRENT_DATE)
+  e. Si count >= lim → retornar error:
+       'Has alcanzado el límite de X relevos que puedes aceptar este mes.'
 
-3. En src/components/ReliefBadge.tsx, al cargar las solicitudes de relevo abiertas,
-   calcula cuántos relevos ya aceptó el usuario este mes y muéstralo:
-   "Has aceptado X de Y relevos permitidos este mes."
-   Si ya llegó al límite, deshabilita el botón "Aceptar" con tooltip explicativo.
+── 3. Panel de admin: nueva Sección en AdminConfigPanel.tsx ─────────────────
+Agregar sección "🔄 Límites de relevos por mes" con:
+  - Control para "Publicador — relevos/mes": input numérico, mín 0, máx 10, default 1
+    Presets: [0, 1, 2, 3]
+  - Control para "Precursor — relevos/mes": input numérico, mín 0, máx 10, default 2
+    Presets: [0, 1, 2, 3, 4]
+  - Botón "Guardar límites" → UPDATE app_config SET relief_limit_publicador=X, relief_limit_precursor=Y
+  - Mensaje de confirmación tras guardar.
+  Leer los valores actuales en el SELECT de fetchConfig (ya incluye app_config).
+
+── 4. ReliefBadge.tsx — contador visual y bloqueo ───────────────────────────
+Al cargar las solicitudes:
+  a. Leer relief_limit_publicador y relief_limit_precursor de app_config.
+  b. Contar cuántos relevos aceptó el usuario este mes:
+       SELECT COUNT(*) FROM relief_requests
+       WHERE acceptor_id = user.id AND status='accepted'
+         AND accepted_at >= primer día del mes actual
+  c. Determinar el límite del usuario según su user_type.
+  d. Mostrar contador: "Has aceptado X de Y relevos este mes."
+     - Verde si X < Y
+     - Amarillo si X = Y - 1
+     - Rojo si X >= Y
+  e. Si X >= Y → deshabilitar el botón "Aceptar" de cada solicitud abierta
+     con tooltip: "Has alcanzado tu límite de relevos para este mes (Y máx.)."
 ```
 
 ---
@@ -378,6 +418,8 @@ Crea src/components/AdminSimulationHistory.tsx:
 -- Pendientes de crear (se crean en los pasos de desarrollo):
 -- 3. database/32_min_advance_hours.sql
 -- 4. database/33_relief_monthly_limits.sql
+--    → agrega relief_limit_publicador INT DEFAULT 1
+--    → agrega relief_limit_precursor  INT DEFAULT 2
 ```
 
 ---

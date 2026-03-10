@@ -32,9 +32,12 @@ export default function ReliefBadge() {
   const [expanded,      setExpanded]      = useState(true)
   const [, setTick] = useState(0)
 
-  // Para saber si el usuario tiene cupo disponible
+  // Para saber si el usuario tiene cupo de turnos disponible
   const [myCurrentCount, setMyCurrentCount] = useState(0)
   const [maxTurnos,       setMaxTurnos]      = useState(1)
+  // Límite mensual de relevos aceptados (Step 3.1)
+  const [myMonthlyReliefCount, setMyMonthlyReliefCount] = useState(0)
+  const [reliefMonthlyLimit,   setReliefMonthlyLimit]   = useState(1)
   const panelRef = useRef<HTMLDivElement>(null)
 
   // ─── Cargar solicitudes pendientes ───────────────────────
@@ -43,10 +46,10 @@ export default function ReliefBadge() {
     setLoading(true)
     const nowIso = new Date().toISOString()
 
-    // Cargar modo de conteo para verificar cupo
+    // Cargar modo de conteo y límites de relevos
     const { data: config } = await supabase
       .from('app_config')
-      .select('counting_mode')
+      .select('counting_mode, relief_limit_publicador, relief_limit_precursor')
       .eq('congregation_id', user.congregation_id)
       .limit(1)
       .single()
@@ -73,6 +76,23 @@ export default function ReliefBadge() {
 
     const limits = mode === 'monthly' ? MONTHLY_LIMITS : WEEKLY_LIMITS
     setMaxTurnos(limits[user.user_type] ?? 1)
+
+    // Límite mensual de relevos aceptados (Step 3.1)
+    const isPrecursor = ['precursor_auxiliar', 'precursor_regular'].includes(user.user_type)
+    const reliefLim = isPrecursor
+      ? ((config?.relief_limit_precursor as number | null | undefined) ?? 2)
+      : ((config?.relief_limit_publicador as number | null | undefined) ?? 1)
+    setReliefMonthlyLimit(reliefLim)
+
+    const thisMonthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+      .toISOString().split('T')[0]
+    const { count: acceptedCount } = await supabase
+      .from('relief_requests')
+      .select('id', { count: 'exact', head: true })
+      .eq('acceptor_id', user.id)
+      .eq('status', 'accepted')
+      .gte('accepted_at', thisMonthStart)
+    setMyMonthlyReliefCount(acceptedCount ?? 0)
 
     // Cargar solicitudes de relevo
     const { data } = await supabase
@@ -205,7 +225,8 @@ export default function ReliefBadge() {
   if (!user || (loading && reliefs.length === 0)) return null
   if (!loading && reliefs.length === 0) return null
 
-  const hasCapacity = myCurrentCount < maxTurnos
+  const hasCapacity      = myCurrentCount < maxTurnos
+  const hasReliefCapacity = myMonthlyReliefCount < reliefMonthlyLimit
 
   return (
     <div ref={panelRef} className="bg-white rounded-xl shadow-md border border-orange-100 mb-4">
@@ -226,6 +247,22 @@ export default function ReliefBadge() {
 
       {expanded && (
         <div className="border-t border-gray-100 divide-y divide-gray-50">
+          {/* Contador mensual de relevos aceptados */}
+          {!loading && (
+            <div className={`mx-4 mt-3 mb-1 px-3 py-2 rounded-lg text-xs font-medium flex items-center gap-1.5 ${
+              myMonthlyReliefCount >= reliefMonthlyLimit
+                ? 'bg-red-50 text-red-700 border border-red-200'
+                : myMonthlyReliefCount === reliefMonthlyLimit - 1
+                ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                : 'bg-green-50 text-green-700 border border-green-200'
+            }`}>
+              <span>{myMonthlyReliefCount >= reliefMonthlyLimit ? '🔴' : myMonthlyReliefCount === reliefMonthlyLimit - 1 ? '🟡' : '🟢'}</span>
+              Has aceptado{' '}
+              <strong>{myMonthlyReliefCount} de {reliefMonthlyLimit}</strong>{' '}
+              relevo{reliefMonthlyLimit !== 1 ? 's' : ''} este mes
+              {myMonthlyReliefCount >= reliefMonthlyLimit && ' — ya alcanzaste tu límite.'}
+            </div>
+          )}
           {loading ? (
             <div className="flex justify-center py-4">
               <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-orange-500" />
@@ -266,10 +303,16 @@ export default function ReliefBadge() {
                         {isUrgent ? '⚠️ Urgente · expira en' : '⏱ Expira en'} {remaining}
                       </p>
                     )}
-                    {/* Aviso si no tiene cupo */}
+                    {/* Aviso si no tiene cupo de turnos */}
                     {!hasCapacity && (
                       <p className="text-[11px] text-gray-400 mt-0.5">
                         Ya alcanzaste tu límite de turnos este período.
+                      </p>
+                    )}
+                    {/* Aviso si alcanzó límite mensual de relevos */}
+                    {!hasReliefCapacity && (
+                      <p className="text-[11px] text-red-400 mt-0.5">
+                        Límite de relevos del mes alcanzado ({reliefMonthlyLimit} máx.).
                       </p>
                     )}
                   </div>
@@ -277,7 +320,8 @@ export default function ReliefBadge() {
                   <div className="flex gap-2 shrink-0">
                     <button
                       onClick={() => handleAccept(rel.id)}
-                      disabled={isLoading || !hasCapacity}
+                      disabled={isLoading || !hasCapacity || !hasReliefCapacity}
+                      title={!hasReliefCapacity ? `Has alcanzado tu límite de relevos para este mes (${reliefMonthlyLimit} máx.)` : undefined}
                       className="px-3 py-1.5 text-xs font-medium bg-orange-500 text-white rounded-lg hover:bg-orange-600 disabled:opacity-40 transition"
                     >
                       {isLoading ? '...' : '✅ Tomar turno'}

@@ -37,7 +37,11 @@ type ConfigData = {
   booking_opens_time: string
   // ── Ventana de cancelación ───────────────────────────
   cancel_window_minutes: number  // ── Anticipo mínimo de reserva (Step 1.2) ─────────────
-  min_advance_hours: number}
+  min_advance_hours: number
+  // ── Step 3.1: límites de relevos por mes ──────────────
+  relief_limit_publicador: number
+  relief_limit_precursor: number
+}
 
 export default function AdminConfigPanel() {
   // ─── Estado ────────────────────────────────────────────────
@@ -60,6 +64,9 @@ export default function AdminConfigPanel() {
   const [weekSaving, setWeekSaving] = useState(false)
   const [weekSavedMsg, setWeekSavedMsg] = useState(false)
   const [confirmAdvance, setConfirmAdvance] = useState(false)
+  // Estado de guardado de límites de relevos por mes (Step 3.1)
+  const [reliefLimitSaving, setReliefLimitSaving] = useState(false)
+  const [reliefLimitSavedMsg, setReliefLimitSavedMsg] = useState(false)
 
   const supabase = createClient()
   const { user } = useUser()
@@ -71,7 +78,7 @@ export default function AdminConfigPanel() {
       if (!congregationId) return
       const { data, error } = await supabase
         .from('app_config')
-        .select('id, active_week_start, counting_mode, priority_enabled, priority_mode, priority_hours_auxiliar, priority_hours_publicador, booking_opens_day, booking_opens_time, cancel_window_minutes, min_advance_hours')
+        .select('id, active_week_start, counting_mode, priority_enabled, priority_mode, priority_hours_auxiliar, priority_hours_publicador, booking_opens_day, booking_opens_time, cancel_window_minutes, min_advance_hours, relief_limit_publicador, relief_limit_precursor')
         .eq('congregation_id', congregationId)
         .limit(1)
         .single()
@@ -207,6 +214,32 @@ export default function AdminConfigPanel() {
       setTimeout(() => setPrioritySavedMsg(false), 3000)
     }
     setPrioritySaving(false)
+  }
+
+  // ─── Guardar límites de relevos por mes (Step 3.1) ──────────
+  const handleSaveReliefLimits = async () => {
+    if (!config) return
+    const pub  = config.relief_limit_publicador
+    const prec = config.relief_limit_precursor
+    if (isNaN(pub)  || pub  < 0 || pub  > 10 ||
+        isNaN(prec) || prec < 0 || prec > 10) {
+      alert('Los valores deben estar entre 0 y 10.')
+      return
+    }
+    setReliefLimitSaving(true)
+    setReliefLimitSavedMsg(false)
+    const { error } = await supabase
+      .from('app_config')
+      .update({ relief_limit_publicador: pub, relief_limit_precursor: prec })
+      .eq('id', config.id)
+      .eq('congregation_id', congregationId)
+    if (error) {
+      alert('Error al guardar: ' + error.message)
+    } else {
+      setReliefLimitSavedMsg(true)
+      setTimeout(() => setReliefLimitSavedMsg(false), 3000)
+    }
+    setReliefLimitSaving(false)
   }
 
   // ─── Spinner de carga ──────────────────────────────────────
@@ -864,6 +897,109 @@ export default function AdminConfigPanel() {
             className="px-6 py-2.5 text-sm font-semibold text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 transition disabled:opacity-60"
           >
             {advanceSaving ? 'Guardando...' : '💾 Guardar anticipación'}
+          </button>
+        </div>
+      </div>
+
+      {/* ══════════════════════════════════════════════════════
+          SECCIÓN 5: LÍMITES DE RELEVOS POR MES (Step 3.1)
+          ══════════════════════════════════════════════════ */}
+      <div className="bg-white rounded-xl shadow-md p-6">
+        <h2 className="text-lg font-bold text-gray-800 mb-1">🔄 Límites de relevos por mes</h2>
+        <p className="text-sm text-gray-500 mb-5">
+          Define cuántos relevos puede <strong>aceptar</strong> cada tipo de usuario por mes.
+          No afecta cuántos relevos puede <em>pedir</em>.
+        </p>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 mb-5">
+          {/* Publicador */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-2">
+              👤 Publicador — relevos que puede aceptar/mes
+            </label>
+            <div className="flex flex-wrap gap-2 mb-3">
+              {[0, 1, 2, 3].map(v => (
+                <button
+                  key={v}
+                  onClick={() => setConfig(c => c ? { ...c, relief_limit_publicador: v } : c)}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium border-2 transition ${
+                    config.relief_limit_publicador === v
+                      ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                      : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+                  }`}
+                >
+                  {v}
+                </button>
+              ))}
+            </div>
+            <input
+              type="number" min={0} max={10}
+              value={config.relief_limit_publicador}
+              onChange={e => {
+                const val = parseInt(e.target.value)
+                if (!isNaN(val) && val >= 0 && val <= 10) {
+                  setConfig(c => c ? { ...c, relief_limit_publicador: val } : c)
+                }
+              }}
+              className="w-28 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+            />
+            <p className="text-[11px] text-gray-400 mt-1">Mín. 0, máx. 10</p>
+          </div>
+
+          {/* Precursor */}
+          <div>
+            <label className="block text-xs font-semibold text-gray-500 mb-2">
+              ⭐ Precursor (aux / regular) — relevos que puede aceptar/mes
+            </label>
+            <div className="flex flex-wrap gap-2 mb-3">
+              {[0, 1, 2, 3, 4].map(v => (
+                <button
+                  key={v}
+                  onClick={() => setConfig(c => c ? { ...c, relief_limit_precursor: v } : c)}
+                  className={`px-3 py-1.5 rounded-lg text-sm font-medium border-2 transition ${
+                    config.relief_limit_precursor === v
+                      ? 'border-indigo-500 bg-indigo-50 text-indigo-700'
+                      : 'border-gray-200 bg-white text-gray-600 hover:border-gray-300'
+                  }`}
+                >
+                  {v}
+                </button>
+              ))}
+            </div>
+            <input
+              type="number" min={0} max={10}
+              value={config.relief_limit_precursor}
+              onChange={e => {
+                const val = parseInt(e.target.value)
+                if (!isNaN(val) && val >= 0 && val <= 10) {
+                  setConfig(c => c ? { ...c, relief_limit_precursor: val } : c)
+                }
+              }}
+              className="w-28 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
+            />
+            <p className="text-[11px] text-gray-400 mt-1">Mín. 0, máx. 10</p>
+          </div>
+        </div>
+
+        <div className="bg-amber-50 border border-amber-200 rounded-lg px-4 py-2 text-sm text-amber-800 mb-5">
+          Límites actuales: publicadores{' '}
+          <strong>{config.relief_limit_publicador}/mes</strong>,{' '}
+          precursores <strong>{config.relief_limit_precursor}/mes</strong>.
+        </div>
+
+        {reliefLimitSavedMsg && (
+          <div className="bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg px-4 py-2 mb-4">
+            ✅ Límites de relevos actualizados. Los usuarios verán el cambio al recargar.
+          </div>
+        )}
+
+        <div className="flex justify-end">
+          <button
+            onClick={handleSaveReliefLimits}
+            disabled={reliefLimitSaving}
+            className="px-6 py-2.5 text-sm font-semibold text-white bg-indigo-600 rounded-xl hover:bg-indigo-700 transition disabled:opacity-60"
+          >
+            {reliefLimitSaving ? 'Guardando...' : '💾 Guardar límites'}
           </button>
         </div>
       </div>
