@@ -631,14 +631,12 @@ export default function ExhibitorGrid() {
     // Un usuario puede recibir varias invitaciones y decide cuál acepta.
     // El RPC accept_invitation verifica capacidad del slot y límites al momento de aceptar.
 
-    // Cargar usuarios activos del mismo género.
-    // Nota: la restricción por congregación se delega a las políticas RLS de Supabase.
-    // El filtro de congregation_id en la query causaba que no apareciera nadie cuando
-    // los usuarios tienen congregation_id en NULL o con un UUID distinto al del perfil.
+    // Cargar usuarios activos del mismo género y misma congregación.
     const { data: candidates } = await supabase
       .from('users')
       .select('id, name, user_type')
       .eq('is_active', true)
+      .eq('congregation_id', congregationId)
       .eq('gender', user?.gender ?? 'M')
       .order('name')
 
