@@ -632,22 +632,15 @@ export default function ExhibitorGrid() {
     // El RPC accept_invitation verifica capacidad del slot y límites al momento de aceptar.
 
     // Cargar usuarios activos del mismo género.
-    // El filtro de congregación se aplica en JS para tolerar usuarios con
-    // congregation_id nulo (creados antes de la migración multi-tenant):
-    //   · misma congregación  → incluir  ✓
-    //   · congregation_id null → incluir  ✓ (legacy, entorno mono-congregación)
-    //   · otra congregación   → excluir  ✗
-    const { data: rawCandidates } = await supabase
+    // Nota: la restricción por congregación se delega a las políticas RLS de Supabase.
+    // El filtro de congregation_id en la query causaba que no apareciera nadie cuando
+    // los usuarios tienen congregation_id en NULL o con un UUID distinto al del perfil.
+    const { data: candidates } = await supabase
       .from('users')
-      .select('id, name, user_type, congregation_id')
+      .select('id, name, user_type')
       .eq('is_active', true)
       .eq('gender', user?.gender ?? 'M')
       .order('name')
-
-    const candidates = (rawCandidates ?? []).filter(
-      u => !(u as { congregation_id?: string | null }).congregation_id ||
-           (u as { congregation_id?: string | null }).congregation_id === congregationId
-    ) as Pick<User, 'id' | 'name' | 'user_type'>[]
 
     const candidateIds = (candidates ?? [])
       .map(u => u.id)
