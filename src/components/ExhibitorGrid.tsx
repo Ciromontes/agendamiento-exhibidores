@@ -29,7 +29,7 @@
  */
 'use client'
 
-import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useUser } from '@/context/UserContext'
 import ActiveWeekBanner from '@/components/ActiveWeekBanner'
@@ -64,6 +64,19 @@ function isWithinCancelWindow(createdAt: string, windowMs: number): boolean {
 }
 
 /**
+ * getCancelCountdown - Retorna el tiempo restante de la ventana de cancelación
+ * en formato "M:SS". Retorna null si ya expiró la ventana.
+ */
+function getCancelCountdown(createdAt: string, windowMs: number, nowMs: number): string | null {
+  const remaining = windowMs - (nowMs - new Date(createdAt).getTime())
+  if (remaining <= 0) return null
+  const totalSecs = Math.ceil(remaining / 1000)
+  const m = Math.floor(totalSecs / 60)
+  const s = totalSecs % 60
+  return `${m}:${s.toString().padStart(2, '0')}`
+}
+
+/**
  * getSlotDatetime - Combina weekStart + day_of_week + start_time en un Date.
  * Usado para calcular cuánto falta para el inicio del turno.
  */
@@ -75,6 +88,12 @@ function getSlotDatetime(weekStart: string, dayOfWeek: number, startTime: string
   const [h, m] = startTime.split(':').map(Number)
   d.setHours(h, m, 0, 0)
   return d
+}
+
+// Tipo extendido para candidatos de invitación (incluye detección de turno huérfano)
+type InviteCandidate = Pick<User, 'id' | 'name' | 'user_type'> & {
+  hasOrphanConflict: boolean
+  orphanLabel: string | null
 }
 
 export default function ExhibitorGrid() {
@@ -97,6 +116,8 @@ export default function ExhibitorGrid() {
   const [lastWeekCompensation, setLastWeekCompensation] = useState(false)
   // Ventana de cancelación en ms (configurable por admin, defecto 5 min)
   const [cancelWindowMs, setCancelWindowMs] = useState(5 * 60_000)
+  // nowMs: tiempo actual en ms, actualizado cada segundo para cuentas regresivas
+  const [nowMs, setNowMs] = useState(() => Date.now())
   // Horas mínimas de anticipación (Step 1.2), configurable desde AdminConfigPanel
   const [minAdvanceHours, setMinAdvanceHours] = useState(12)
 
@@ -126,7 +147,7 @@ export default function ExhibitorGrid() {
     { slot_id: string; from_user_id: string; to_user_id: string }[]
   >([])
   const [inviteModalSlot, setInviteModalSlot] = useState<string | null>(null)
-  const [inviteUsers, setInviteUsers] = useState<Pick<User, 'id' | 'name' | 'user_type'>[]>([])
+  const [inviteUsers, setInviteUsers] = useState<InviteCandidate[]>([])
   const [inviteLoading, setInviteLoading] = useState(false)
   const [inviteSending, setInviteSending] = useState<string | null>(null)
 
@@ -413,22 +434,42 @@ export default function ExhibitorGrid() {
     setOpenReliefBySlot({})
   }, [user?.id])
 
+  // ─── Intervalo 1 s para cuentas regresivas de cancelación ──
+  useEffect(() => {
+    const interval = setInterval(() => setNowMs(Date.now()), 1000)
+    return () => clearInterval(interval)
+  }, [])
+
+  // ─── Refs para callbacks de Realtime (evitan stale closures) ──
+  // Sin ellos, los callbacks dentro del canal capturan una versión
+  // antigua de loadData/loadMonthlyReservations cuando el efecto
+  // se actualiza, perdiendo actualizaciones en tiempo real.
+  const loadDataRef = useRef(loadData)
+  const loadMonthlyRef = useRef(loadMonthlyReservations)
+  useEffect(() => { loadDataRef.current = loadData }, [loadData])
+  useEffect(() => { loadMonthlyRef.current = loadMonthlyReservations }, [loadMonthlyReservations])
+
   // Carga inicial + suscripción Realtime (Feature 3: escuchar reservas, invitaciones y relevos)
-  // Nota: depende de `loadData` (no de []) para que se re-ejecute cuando cambia el usuario,
-  // recreando el canal Realtime con el contexto actualizado del usuario actual.
+  // Nota: depende de `loadData` para que se re-ejecute cuando cambia usuario/semana,
+  // recreando el canal con el contexto actualizado. Los refs garantizan que los
+  // callbacks siempre llamen la versión más reciente de loadData.
   useEffect(() => {
     loadData()
 
-    const reload = () => {
-      loadData()
-      loadMonthlyReservations()
-    }
-
     const channel = supabase
       .channel('grid-realtime')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'reservations' }, reload)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'invitations' }, reload)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'relief_requests' }, reload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'reservations' }, () => {
+        loadDataRef.current()
+        loadMonthlyRef.current()
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'invitations' }, () => {
+        loadDataRef.current()
+        loadMonthlyRef.current()
+      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'relief_requests' }, () => {
+        loadDataRef.current()
+        loadMonthlyRef.current()
+      })
       .subscribe()
 
     return () => { supabase.removeChannel(channel) }
@@ -590,12 +631,13 @@ export default function ExhibitorGrid() {
     // Un usuario puede recibir varias invitaciones y decide cuál acepta.
     // El RPC accept_invitation verifica capacidad del slot y límites al momento de aceptar.
 
-    // Cargar usuarios del mismo género + conteo de reservas activas
+    // Cargar usuarios del mismo género Y misma congregación
     const { data: candidates } = await supabase
       .from('users')
       .select('id, name, user_type')
       .eq('is_active', true)
       .eq('gender', user?.gender ?? 'M')
+      .eq('congregation_id', congregationId)   // Fase 1a: solo misma congregación
       .order('name')
 
     const candidateIds = (candidates ?? [])
@@ -616,15 +658,60 @@ export default function ExhibitorGrid() {
       })
     }
 
-    // Excluir los que ya tienen su límite lleno
-    const available = (candidates ?? []).filter(u => {
+    // Fase 4: Detectar turnos huérfanos (slots con 1 sola reserva en la semana)
+    // para candidatos que ya alcanzaron su límite. Si tienen un turno huérfano,
+    // igual pueden recibir una invitación, pero se les mostrará un aviso.
+    const orphanSlotByUser = new Map<string, { exhibitorName: string; dayOfWeek: number; startTime: string; endTime: string }>()
+    const atLimitCandidates = (candidates ?? []).filter(u => {
       if (occupiedIds.has(u.id)) return false
       const count = reservationCounts.get(u.id) ?? 0
-      const max   = limitsTable[u.user_type] ?? 1
-      return count < max
+      const max = limitsTable[u.user_type] ?? 1
+      return count >= max
     })
+    for (const c of atLimitCandidates) {
+      // Buscar una reserva de este candidato donde el slot solo tenga 1 persona
+      const orphanRes = reservations.find(r => {
+        if (r.user_id !== c.id || r.status === 'cancelled') return false
+        const slotCount = reservations.filter(
+          x => x.time_slot_id === r.time_slot_id && x.status !== 'cancelled'
+        ).length
+        return slotCount === 1
+      })
+      if (orphanRes) {
+        const slot = timeSlots.find(s => s.id === orphanRes.time_slot_id)
+        const exhibitor = exhibitors.find(e => slot && e.id === slot.exhibitor_id)
+        orphanSlotByUser.set(c.id, {
+          exhibitorName: exhibitor?.name ?? 'Exhibidor',
+          dayOfWeek: slot?.day_of_week ?? 0,
+          startTime: slot?.start_time ?? '',
+          endTime: slot?.end_time ?? '',
+        })
+      }
+    }
 
-    setInviteUsers(available as Pick<User, 'id' | 'name' | 'user_type'>[])
+    // Candidatos finales:
+    //   • Por debajo de su límite → aparecen normalmente
+    //   • En su límite CON turno huérfano → aparecen con aviso de conflicto
+    //   • En su límite SIN turno huérfano (todos emparejados) → excluidos
+    const available: InviteCandidate[] = (candidates ?? [])
+      .filter(u => {
+        if (occupiedIds.has(u.id)) return false
+        const count = reservationCounts.get(u.id) ?? 0
+        const max = limitsTable[u.user_type] ?? 1
+        return count < max || orphanSlotByUser.has(u.id)
+      })
+      .map(u => ({
+        ...u,
+        hasOrphanConflict: orphanSlotByUser.has(u.id),
+        orphanLabel: orphanSlotByUser.has(u.id)
+          ? (() => {
+              const o = orphanSlotByUser.get(u.id)!
+              return `${o.exhibitorName} – ${DAYS_OF_WEEK[o.dayOfWeek]} ${formatTimeLabel(o.startTime, o.endTime)}`
+            })()
+          : null,
+      }))
+
+    setInviteUsers(available)
     setInviteLoading(false)
   }
 
@@ -938,10 +1025,10 @@ export default function ExhibitorGrid() {
       return
     }
 
-    // Fase 9A: Si el slot está lleno (2/2), el otro ocupante no es el cónyuge,
-    // y pasó la ventana de 1h → forzar flujo de relevo en lugar de cancelar.
-    const activeInSlot = slotRes.length
-    if (activeInSlot === 2 && !otherIsSpouse && !isWithinCancelWindow(myReservation.created_at, cancelWindowMs)) {
+    // Fase 2: Fuera de la ventana de cancelación (y no es cónyuge) → flujo de relevo.
+    // Aplica tanto para slots 1/2 como 2/2: el usuario no puede cancelar unilateralmente
+    // después de los primeros minutos, debe pedir relevo.
+    if (!otherIsSpouse && !isWithinCancelWindow(myReservation.created_at, cancelWindowMs)) {
       await handleOpenReliefModal(myReservation)
       return
     }
@@ -1245,14 +1332,31 @@ export default function ExhibitorGrid() {
                           <p className="font-semibold truncate text-[11px]">
                             {isSpouse && '💑 '}{reservation?.user?.name || 'Reservado'}
                           </p>
-                          {isOwn && (
-                            <button
-                              onClick={() => handleCancel(reservation!.id)}
-                              className="text-red-500 hover:text-red-700 text-[10px] underline"
-                            >
-                              Cancelar
-                            </button>
-                          )}
+                          {isOwn && (() => {
+                            const cd = getCancelCountdown(reservation!.created_at, cancelWindowMs, nowMs)
+                            if (cd) {
+                              return (
+                                <button
+                                  onClick={() => handleCancel(reservation!.id)}
+                                  className="text-red-500 hover:text-red-700 text-[10px] underline"
+                                >
+                                  Cancelar <span className="font-mono text-red-400">{cd}</span>
+                                </button>
+                              )
+                            }
+                            const hasPendingRelief = myPendingReliefs.some(r => r.slot_id === slot.id)
+                            if (hasPendingRelief) {
+                              return <span className="text-[10px] text-amber-500 font-medium">⏳ Relevo pendiente</span>
+                            }
+                            return (
+                              <button
+                                onClick={() => handleOpenReliefModal(reservation!)}
+                                className="text-orange-500 hover:text-orange-700 text-[10px] underline"
+                              >
+                                🔄 Pedir relevo
+                              </button>
+                            )
+                          })()}
                           {/* Separador + espacio para persona 2 */}
                           <div className="border-t border-dashed mt-1 pt-1">
                             {hasOwnReservation ? (
@@ -1393,14 +1497,26 @@ export default function ExhibitorGrid() {
                               </button>
                             )
                           }
-                          // Dentro de ventana configurable o turno de pareja → Cancelar directo
-                          if (isCoupleSlot || isWithinCancelWindow(pos1!.created_at, cancelWindowMs)) {
+                          // Turno de pareja → Cancelar siempre (no hay terceros afectados)
+                          if (isCoupleSlot) {
                             return (
                               <button
                                 onClick={() => handleCancel(pos1!.id)}
                                 className="text-red-500 hover:text-red-700 text-[10px] underline"
                               >
-                                Cancelar{isCoupleSlot ? ' ambos' : ''}
+                                Cancelar ambos
+                              </button>
+                            )
+                          }
+                          // Dentro de la ventana → Cancelar con cuenta regresiva
+                          const cd1 = getCancelCountdown(pos1!.created_at, cancelWindowMs, nowMs)
+                          if (cd1) {
+                            return (
+                              <button
+                                onClick={() => handleCancel(pos1!.id)}
+                                className="text-red-500 hover:text-red-700 text-[10px] underline"
+                              >
+                                Cancelar <span className="font-mono text-red-400">{cd1}</span>
                               </button>
                             )
                           }
@@ -1442,14 +1558,26 @@ export default function ExhibitorGrid() {
                               </button>
                             )
                           }
-                          // Dentro de ventana configurable o turno de pareja → Cancelar directo
-                          if (isCoupleSlot || isWithinCancelWindow(pos2!.created_at, cancelWindowMs)) {
+                          // Turno de pareja → Cancelar siempre (no hay terceros afectados)
+                          if (isCoupleSlot) {
                             return (
                               <button
                                 onClick={() => handleCancel(pos2!.id)}
                                 className="text-red-500 hover:text-red-700 text-[10px] underline"
                               >
-                                Cancelar{isCoupleSlot ? ' ambos' : ''}
+                                Cancelar ambos
+                              </button>
+                            )
+                          }
+                          // Dentro de la ventana → Cancelar con cuenta regresiva
+                          const cd2 = getCancelCountdown(pos2!.created_at, cancelWindowMs, nowMs)
+                          if (cd2) {
+                            return (
+                              <button
+                                onClick={() => handleCancel(pos2!.id)}
+                                className="text-red-500 hover:text-red-700 text-[10px] underline"
+                              >
+                                Cancelar <span className="font-mono text-red-400">{cd2}</span>
                               </button>
                             )
                           }
@@ -1522,10 +1650,15 @@ export default function ExhibitorGrid() {
                       i => i.slot_id === inviteModalSlot && i.to_user_id === u.id
                     )
                     return (
-                      <li key={u.id} className="flex items-center justify-between py-3 px-1">
+                      <li key={u.id} className="flex items-start justify-between py-3 px-1">
                         <div>
                           <p className="text-sm font-medium text-gray-800">{u.name}</p>
                           <p className="text-[11px] text-gray-500">{USER_TYPE_LABELS[u.user_type]}</p>
+                          {u.hasOrphanConflict && u.orphanLabel && (
+                            <p className="text-[10px] text-amber-600 mt-0.5 max-w-[160px] leading-tight">
+                              ⚠️ Si acepta, libera: {u.orphanLabel}
+                            </p>
+                          )}
                         </div>
                         {alreadySent ? (
                           <span className="text-xs text-indigo-400 font-medium">✓ Enviada</span>

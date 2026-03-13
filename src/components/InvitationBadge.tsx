@@ -36,6 +36,11 @@ export default function InvitationBadge() {
   const [expanded, setExpanded] = useState(true)
   // Tick periódico para re-renderizar y actualizar los countdowns
   const [, setTick] = useState(0)
+  // Modal de confirmación cuando aceptar una invitación liberaría un turno huérfano
+  const [conflictModal, setConflictModal] = useState<{
+    invitationId: string
+    orphanLabel: string
+  } | null>(null)
 
   // ─── Cargar invitaciones pendientes no expiradas ──────────
   const fetchInvitations = useCallback(async () => {
@@ -46,7 +51,7 @@ export default function InvitationBadge() {
       .select(`
         *,
         from_user:users!invitations_from_user_id_fkey(id, name),
-        slot:time_slots!invitations_slot_id_fkey(id, day_of_week, start_time, end_time)
+        slot:time_slots!invitations_slot_id_fkey(id, day_of_week, start_time, end_time, exhibitor:exhibitors(name))
       `)
       .eq('to_user_id', user.id)
       .eq('status', 'pending')
@@ -103,15 +108,40 @@ export default function InvitationBadge() {
     return () => clearInterval(interval)
   }, [])
 
-  // ─── Aceptar invitación ───────────────────────────────────
-  const handleAccept = async (invitationId: string) => {
-    setActionLoading(invitationId)
+  // ─── Ejecutar aceptación (sin verificación de conflicto) ─────
+  const doAccept = async (invitationId: string) => {
     const { data, error } = await supabase
       .rpc('accept_invitation', { p_invitation_id: invitationId })
     if (error || !data?.success) {
       alert('No se pudo aceptar: ' + (data?.error ?? error?.message ?? 'Error desconocido'))
     }
     await fetchInvitations()
+  }
+
+  // ─── Aceptar invitación ───────────────────────────────────
+  // Primero verifica si aceptar liberaría un turno huérfano del usuario.
+  // Si hay conflicto, muestra un modal de confirmación antes de proceder.
+  const handleAccept = async (invitationId: string) => {
+    setActionLoading(invitationId)
+
+    // Verificar conflicto con turno huérfano (Fase 4)
+    const { data: conflictData } = await supabase
+      .rpc('check_invitation_accept_conflict', { p_invitation_id: invitationId })
+
+    if (conflictData?.has_conflict) {
+      // Construir etiqueta del turno que quedaría libre
+      const dayName = DAYS_OF_WEEK[conflictData.day_of_week as number] ?? ''
+      const timeLabel = formatTimeLabel(
+        conflictData.start_time as string,
+        conflictData.end_time as string,
+      )
+      const label = `${conflictData.exhibitor_name as string} – ${dayName} ${timeLabel}`
+      setConflictModal({ invitationId, orphanLabel: label })
+      setActionLoading(null)
+      return
+    }
+
+    await doAccept(invitationId)
     setActionLoading(null)
   }
 
@@ -130,6 +160,7 @@ export default function InvitationBadge() {
   if (!loading && invitations.length === 0) return null
 
   return (
+    <>
     <div className="bg-white rounded-xl shadow-md border border-indigo-100 mb-4">
       {/* Cabecera */}
       <button
@@ -170,7 +201,17 @@ export default function InvitationBadge() {
                   <div className="flex-1">
                     <p className="text-sm text-gray-800">
                       <span className="font-semibold">{inv.from_user?.name ?? 'Alguien'}</span>
-                      {' '}te invita al turno del{' '}
+                      {' '}te invita{' '}
+                      {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                      {(inv.slot as any)?.exhibitor?.name && (
+                        <>
+                          en{' '}
+                          {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
+                          <span className="font-semibold text-indigo-700">{(inv.slot as any).exhibitor.name}</span>
+                          {' '}
+                        </>
+                      )}
+                      el{' '}
                       <span className="font-semibold text-indigo-700">{dayName}</span>
                       {' · '}
                       <span className="text-gray-600">{timeLabel}</span>
@@ -208,5 +249,41 @@ export default function InvitationBadge() {
         </div>
       )}
     </div>
+
+    {/* ─── Modal de confirmación de conflicto (Fase 4) ─────────── */}
+    {/* Aparece cuando aceptar la invitación liberaría un turno huérfano */}
+    {conflictModal && (
+      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+        <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-5">
+          <h3 className="text-base font-bold text-gray-800 mb-2">⚠️ Turno en conflicto</h3>
+          <p className="text-sm text-gray-600 mb-4">
+            Si aceptas esta invitación, tu turno sin compañero en{' '}
+            <span className="font-semibold text-indigo-700">{conflictModal.orphanLabel}</span>{' '}
+            quedará libre para que otros puedan tomarlo.
+          </p>
+          <div className="flex gap-2 justify-end">
+            <button
+              onClick={() => setConflictModal(null)}
+              className="px-4 py-2 text-sm rounded-lg bg-gray-100 text-gray-700 hover:bg-gray-200 transition"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={async () => {
+                const id = conflictModal.invitationId
+                setConflictModal(null)
+                setActionLoading(id)
+                await doAccept(id)
+                setActionLoading(null)
+              }}
+              className="px-4 py-2 text-sm rounded-lg bg-green-600 text-white hover:bg-green-700 transition"
+            >
+              Aceptar de todas formas
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+  </>
   )
 }
