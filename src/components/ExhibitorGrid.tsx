@@ -632,17 +632,16 @@ export default function ExhibitorGrid() {
     // El RPC accept_invitation verifica capacidad del slot y límites al momento de aceptar.
 
     // Cargar usuarios activos del mismo género y misma congregación.
-    console.log('[Invite] congregationId:', congregationId, '| gender:', user?.gender)
-    const { data: candidates, error: candidatesError } = await supabase
-      .from('users')
-      .select('id, name, user_type')
-      .eq('is_active', true)
-      .eq('congregation_id', congregationId)
-      .eq('gender', user?.gender ?? 'M')
-      .order('name')
-    console.log('[Invite] candidates:', candidates?.length, '| error:', candidatesError?.message)
+    // Usa RPC SECURITY DEFINER para evitar que las políticas RLS bloqueen
+    // la consulta filtrada por congregation_id desde el cliente anon.
+    const { data: rawCandidates } = await supabase
+      .rpc('get_invite_candidates', {
+        p_congregation_id: congregationId,
+        p_gender:          user?.gender ?? 'M',
+      })
+    const candidates = (rawCandidates ?? []) as Pick<User, 'id' | 'name' | 'user_type'>[]
 
-    const candidateIds = (candidates ?? [])
+    const candidateIds = candidates
       .map(u => u.id)
       .filter(id => !occupiedIds.has(id))
 
@@ -664,7 +663,7 @@ export default function ExhibitorGrid() {
     // para candidatos que ya alcanzaron su límite. Si tienen un turno huérfano,
     // igual pueden recibir una invitación, pero se les mostrará un aviso.
     const orphanSlotByUser = new Map<string, { exhibitorName: string; dayOfWeek: number; startTime: string; endTime: string }>()
-    const atLimitCandidates = (candidates ?? []).filter(u => {
+    const atLimitCandidates = candidates.filter(u => {
       if (occupiedIds.has(u.id)) return false
       const count = reservationCounts.get(u.id) ?? 0
       const max = limitsTable[u.user_type] ?? 1
@@ -695,7 +694,7 @@ export default function ExhibitorGrid() {
     //   • Por debajo de su límite → aparecen normalmente
     //   • En su límite CON turno huérfano → aparecen con aviso de conflicto
     //   • En su límite SIN turno huérfano (todos emparejados) → excluidos
-    const available: InviteCandidate[] = (candidates ?? [])
+    const available: InviteCandidate[] = candidates
       .filter(u => {
         if (occupiedIds.has(u.id)) return false
         const count = reservationCounts.get(u.id) ?? 0
@@ -714,7 +713,6 @@ export default function ExhibitorGrid() {
       }))
 
     setInviteUsers(available)
-    console.log('[Invite] available final:', available.length)
     setInviteLoading(false)
   }
 
