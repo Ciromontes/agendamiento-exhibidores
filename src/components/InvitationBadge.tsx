@@ -36,11 +36,12 @@ export default function InvitationBadge() {
   const [expanded, setExpanded] = useState(true)
   // Tick periódico para re-renderizar y actualizar los countdowns
   const [, setTick] = useState(0)
-  // Modal de confirmación cuando aceptar una invitación liberaría un turno huérfano
+  // Modal de selección cuando aceptar requiere liberar un turno huérfano
+  type OrphanOption = { reservationId: string; label: string }
   const [conflictModal, setConflictModal] = useState<{
     invitationId: string
-    orphanLabel: string
-    orphanReservationId: string  // ID de la reserva huérfana a cancelar antes de aceptar
+    orphanOptions: OrphanOption[]      // 1 opción = confirmación simple, 2+ = selección
+    selectedOrphanId: string | null    // cuál elige liberar (preseleccionado si solo hay 1)
   } | null>(null)
 
   // ─── Cargar invitaciones pendientes no expiradas ──────────
@@ -115,32 +116,64 @@ export default function InvitationBadge() {
       .rpc('accept_invitation', { p_invitation_id: invitationId })
     if (error || !data?.success) {
       alert('No se pudo aceptar: ' + (data?.error ?? error?.message ?? 'Error desconocido'))
+    } else {
+      // Notificar a ExhibitorGrid que recargue su grilla sin refrescar página
+      window.dispatchEvent(new Event('exhibitor-grid-refresh'))
     }
     await fetchInvitations()
   }
 
   // ─── Aceptar invitación ───────────────────────────────────
-  // Primero verifica si aceptar liberaría un turno huérfano del usuario.
-  // Si hay conflicto, muestra un modal de confirmación antes de proceder.
+  // 1. Verifica si el usuario está en su límite (check_invitation_accept_conflict)
+  // 2. Si hay conflicto, obtiene TODOS sus turnos huérfanos (/api/orphan-slots)
+  // 3. Si hay 1 huérfano: muestra confirmación simple
+  //    Si hay 2+: muestra selector para que elija cuál liberar
   const handleAccept = async (invitationId: string) => {
     setActionLoading(invitationId)
 
-    // Verificar conflicto con turno huérfano (Fase 4)
+    // Verificar si el usuario está al límite con turno(s) huérfano(s)
     const { data: conflictData } = await supabase
       .rpc('check_invitation_accept_conflict', { p_invitation_id: invitationId })
 
     if (conflictData?.has_conflict) {
-      // Construir etiqueta del turno que quedaría libre
-      const dayName = DAYS_OF_WEEK[conflictData.day_of_week as number] ?? ''
-      const timeLabel = formatTimeLabel(
-        conflictData.start_time as string,
-        conflictData.end_time as string,
-      )
-      const label = `${conflictData.exhibitor_name as string} – ${dayName} ${timeLabel}`
+      // Obtener TODOS los turnos huérfanos del usuario para esa semana
+      const invitation = invitations.find(i => i.id === invitationId)
+      const orphanRes = await fetch('/api/orphan-slots', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          user_id:        user!.id,
+          congregation_id: user!.congregation_id,
+          week_start:     invitation?.week_start ?? '',
+        }),
+      })
+      const orphans: {
+        reservation_id: string
+        exhibitor_name: string
+        day_of_week: number
+        start_time: string
+        end_time: string
+      }[] = orphanRes.ok ? await orphanRes.json() : []
+
+      const orphanOptions = orphans.map(o => ({
+        reservationId: o.reservation_id,
+        label: `${o.exhibitor_name} – ${DAYS_OF_WEEK[o.day_of_week] ?? ''} ${formatTimeLabel(o.start_time, o.end_time)}`,
+      }))
+
+      // Si la API no devolvió nada, usar el dato del RPC como fallback
+      if (orphanOptions.length === 0) {
+        const dayName = DAYS_OF_WEEK[conflictData.day_of_week as number] ?? ''
+        const timeLabel = formatTimeLabel(conflictData.start_time as string, conflictData.end_time as string)
+        orphanOptions.push({
+          reservationId: conflictData.reservation_id as string,
+          label: `${conflictData.exhibitor_name as string} – ${dayName} ${timeLabel}`,
+        })
+      }
+
       setConflictModal({
         invitationId,
-        orphanLabel: label,
-        orphanReservationId: conflictData.reservation_id as string,
+        orphanOptions,
+        selectedOrphanId: orphanOptions.length === 1 ? orphanOptions[0].reservationId : null,
       })
       setActionLoading(null)
       return
@@ -255,17 +288,57 @@ export default function InvitationBadge() {
       )}
     </div>
 
-    {/* ─── Modal de confirmación de conflicto (Fase 4) ─────────── */}
-    {/* Aparece cuando aceptar la invitación liberaría un turno huérfano */}
+    {/* ─── Modal de conflicto: 1 huérfano = confirmación, 2+ = selección ─── */}
     {conflictModal && (
       <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
         <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-5">
           <h3 className="text-base font-bold text-gray-800 mb-2">⚠️ Turno en conflicto</h3>
-          <p className="text-sm text-gray-600 mb-4">
-            Si aceptas esta invitación, tu turno sin compañero en{' '}
-            <span className="font-semibold text-indigo-700">{conflictModal.orphanLabel}</span>{' '}
-            quedará libre para que otros puedan tomarlo.
-          </p>
+
+          {conflictModal.orphanOptions.length === 1 ? (
+            /* ── Un huérfano: mensaje de confirmación simple ── */
+            <p className="text-sm text-gray-600 mb-4">
+              Si aceptas esta invitación, tu turno sin compañero en{' '}
+              <span className="font-semibold text-indigo-700">
+                {conflictModal.orphanOptions[0].label}
+              </span>{' '}
+              quedará libre para que otros puedan tomarlo.
+            </p>
+          ) : (
+            /* ── Varios huérfanos: pedir al usuario cuál quiere liberar ── */
+            <div className="mb-4">
+              <p className="text-sm text-gray-600 mb-3">
+                Para aceptar esta invitación necesitas liberar uno de tus turnos sin compañero.
+                ¿Cuál deseas liberar?
+              </p>
+              <div className="space-y-2">
+                {conflictModal.orphanOptions.map(opt => (
+                  <label
+                    key={opt.reservationId}
+                    className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition ${
+                      conflictModal.selectedOrphanId === opt.reservationId
+                        ? 'border-indigo-500 bg-indigo-50'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="orphan-select"
+                      value={opt.reservationId}
+                      checked={conflictModal.selectedOrphanId === opt.reservationId}
+                      onChange={() =>
+                        setConflictModal(prev =>
+                          prev ? { ...prev, selectedOrphanId: opt.reservationId } : null
+                        )
+                      }
+                      className="accent-indigo-600"
+                    />
+                    <span className="text-sm text-gray-700">{opt.label}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="flex gap-2 justify-end">
             <button
               onClick={() => setConflictModal(null)}
@@ -274,22 +347,24 @@ export default function InvitationBadge() {
               Cancelar
             </button>
             <button
+              disabled={!conflictModal.selectedOrphanId}
               onClick={async () => {
-                const { invitationId, orphanReservationId } = conflictModal
+                const { invitationId, selectedOrphanId } = conflictModal
+                if (!selectedOrphanId) return
                 setConflictModal(null)
                 setActionLoading(invitationId)
-                // Cancelar el turno huérfano primero para liberar el cupo
+                // Cancelar el turno huérfano elegido para liberar el cupo
                 await supabase
                   .from('reservations')
                   .update({ status: 'cancelled' })
-                  .eq('id', orphanReservationId)
+                  .eq('id', selectedOrphanId)
                 // Ahora el usuario tiene cupo → accept_invitation funcionará
                 await doAccept(invitationId)
                 setActionLoading(null)
               }}
-              className="px-4 py-2 text-sm rounded-lg bg-green-600 text-white hover:bg-green-700 transition"
+              className="px-4 py-2 text-sm rounded-lg bg-green-600 text-white hover:bg-green-700 disabled:opacity-40 disabled:cursor-not-allowed transition"
             >
-              Aceptar de todas formas
+              {conflictModal.orphanOptions.length === 1 ? 'Aceptar de todas formas' : 'Liberar y aceptar'}
             </button>
           </div>
         </div>

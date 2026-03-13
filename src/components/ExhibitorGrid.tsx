@@ -449,6 +449,14 @@ export default function ExhibitorGrid() {
   useEffect(() => { loadDataRef.current = loadData }, [loadData])
   useEffect(() => { loadMonthlyRef.current = loadMonthlyReservations }, [loadMonthlyReservations])
 
+  // Escuchar evento de InvitationBadge para recargar la grilla al instante
+  // cuando el usuario acepta una invitación (sin esperar Realtime).
+  useEffect(() => {
+    const handler = () => loadDataRef.current()
+    window.addEventListener('exhibitor-grid-refresh', handler)
+    return () => window.removeEventListener('exhibitor-grid-refresh', handler)
+  }, [])
+
   // Carga inicial + suscripción Realtime (Feature 3: escuchar reservas, invitaciones y relevos)
   // Nota: depende de `loadData` para que se re-ejecute cuando cambia usuario/semana,
   // recreando el canal con el contexto actualizado. Los refs garantizan que los
