@@ -647,7 +647,7 @@ export default function ExhibitorGrid() {
     const candidates = (rawCandidates ?? []).filter(
       u => !(u as { congregation_id?: string | null }).congregation_id ||
            (u as { congregation_id?: string | null }).congregation_id === congregationId
-    ) as { id: string; name: string; user_type: string }[]
+    ) as Pick<User, 'id' | 'name' | 'user_type'>[]
 
     const candidateIds = (candidates ?? [])
       .map(u => u.id)
