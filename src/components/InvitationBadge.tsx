@@ -40,6 +40,7 @@ export default function InvitationBadge() {
   const [conflictModal, setConflictModal] = useState<{
     invitationId: string
     orphanLabel: string
+    orphanReservationId: string  // ID de la reserva huérfana a cancelar antes de aceptar
   } | null>(null)
 
   // ─── Cargar invitaciones pendientes no expiradas ──────────
@@ -136,7 +137,11 @@ export default function InvitationBadge() {
         conflictData.end_time as string,
       )
       const label = `${conflictData.exhibitor_name as string} – ${dayName} ${timeLabel}`
-      setConflictModal({ invitationId, orphanLabel: label })
+      setConflictModal({
+        invitationId,
+        orphanLabel: label,
+        orphanReservationId: conflictData.reservation_id as string,
+      })
       setActionLoading(null)
       return
     }
@@ -270,10 +275,16 @@ export default function InvitationBadge() {
             </button>
             <button
               onClick={async () => {
-                const id = conflictModal.invitationId
+                const { invitationId, orphanReservationId } = conflictModal
                 setConflictModal(null)
-                setActionLoading(id)
-                await doAccept(id)
+                setActionLoading(invitationId)
+                // Cancelar el turno huérfano primero para liberar el cupo
+                await supabase
+                  .from('reservations')
+                  .update({ status: 'cancelled' })
+                  .eq('id', orphanReservationId)
+                // Ahora el usuario tiene cupo → accept_invitation funcionará
+                await doAccept(invitationId)
                 setActionLoading(null)
               }}
               className="px-4 py-2 text-sm rounded-lg bg-green-600 text-white hover:bg-green-700 transition"

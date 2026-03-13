@@ -53,13 +53,15 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    // Retornar candidatos: solo campos no sensibles
+    // Retornar candidatos: solo campos no sensibles.
+    // Excluir admins: ellos no acceden al dashboard de usuario.
     const { data: candidates, error } = await supabase
       .from('users')
       .select('id, name, user_type')
       .eq('congregation_id', congregation_id)
       .eq('gender', gender)
       .eq('is_active', true)
+      .eq('is_admin', false)
       .order('name')
 
     if (error) {
