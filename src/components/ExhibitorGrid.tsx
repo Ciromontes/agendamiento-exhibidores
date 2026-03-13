@@ -632,13 +632,15 @@ export default function ExhibitorGrid() {
     // El RPC accept_invitation verifica capacidad del slot y límites al momento de aceptar.
 
     // Cargar usuarios activos del mismo género y misma congregación.
-    const { data: candidates } = await supabase
+    console.log('[Invite] congregationId:', congregationId, '| gender:', user?.gender)
+    const { data: candidates, error: candidatesError } = await supabase
       .from('users')
       .select('id, name, user_type')
       .eq('is_active', true)
       .eq('congregation_id', congregationId)
       .eq('gender', user?.gender ?? 'M')
       .order('name')
+    console.log('[Invite] candidates:', candidates?.length, '| error:', candidatesError?.message)
 
     const candidateIds = (candidates ?? [])
       .map(u => u.id)
@@ -712,6 +714,7 @@ export default function ExhibitorGrid() {
       }))
 
     setInviteUsers(available)
+    console.log('[Invite] available final:', available.length)
     setInviteLoading(false)
   }
 
