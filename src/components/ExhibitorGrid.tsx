@@ -634,8 +634,11 @@ export default function ExhibitorGrid() {
     // Cargar usuarios activos del mismo género y misma congregación.
     // Usa RPC SECURITY DEFINER para evitar que las políticas RLS bloqueen
     // la consulta filtrada por congregation_id desde el cliente anon.
+    // La función verifica en BD que el user_id pertenece a congregation_id
+    // antes de retornar datos → no se pueden consultar otras congregaciones.
     const { data: rawCandidates } = await supabase
       .rpc('get_invite_candidates', {
+        p_user_id:         user!.id,
         p_congregation_id: congregationId,
         p_gender:          user?.gender ?? 'M',
       })
