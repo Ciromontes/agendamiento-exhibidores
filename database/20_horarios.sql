@@ -16,10 +16,19 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
 DECLARE
-  v_new_id uuid;
+  v_new_id        uuid;
+  v_congregation  uuid;
 BEGIN
   IF p_end_time <= p_start_time THEN
     RAISE EXCEPTION 'La hora de fin debe ser mayor que la hora de inicio';
+  END IF;
+
+  -- Obtener congregation_id del exhibidor
+  SELECT congregation_id INTO v_congregation
+    FROM exhibitors WHERE id = p_exhibitor_id;
+
+  IF v_congregation IS NULL THEN
+    RAISE EXCEPTION 'Exhibidor no encontrado o sin congregación';
   END IF;
 
   -- Eliminar automáticamente slots solapados del mismo exhibidor/día
@@ -35,8 +44,9 @@ BEGIN
           AND week_start >= date_trunc('week', CURRENT_DATE)::date
       );
 
-  INSERT INTO time_slots (exhibitor_id, day_of_week, start_time, end_time, is_active, block_reason)
+  INSERT INTO time_slots (congregation_id, exhibitor_id, day_of_week, start_time, end_time, is_active, block_reason)
     VALUES (
+      v_congregation,
       p_exhibitor_id,
       p_day_of_week,
       p_start_time,
