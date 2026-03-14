@@ -17,22 +17,23 @@ SET search_path = public
 AS $$
 DECLARE
   v_new_id uuid;
-  v_overlap_count integer;
 BEGIN
   IF p_end_time <= p_start_time THEN
     RAISE EXCEPTION 'La hora de fin debe ser mayor que la hora de inicio';
   END IF;
 
-  SELECT COUNT(*) INTO v_overlap_count
-    FROM time_slots
+  -- Eliminar automáticamente slots solapados del mismo exhibidor/día
+  -- (el frontend ya pidió confirmación al admin si eran activos)
+  DELETE FROM time_slots
     WHERE exhibitor_id = p_exhibitor_id
       AND day_of_week  = p_day_of_week
       AND start_time   < p_end_time
-      AND end_time     > p_start_time;
-
-  IF v_overlap_count > 0 THEN
-    RAISE EXCEPTION 'Ya existe un bloque horario solapado para ese exhibidor en ese día y horario';
-  END IF;
+      AND end_time     > p_start_time
+      AND id NOT IN (
+        SELECT DISTINCT time_slot_id FROM reservations
+        WHERE status != 'cancelled'
+          AND week_start >= date_trunc('week', CURRENT_DATE)::date
+      );
 
   INSERT INTO time_slots (exhibitor_id, day_of_week, start_time, end_time, is_active, block_reason)
     VALUES (

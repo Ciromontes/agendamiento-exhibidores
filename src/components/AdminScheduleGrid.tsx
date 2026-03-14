@@ -242,7 +242,7 @@ export default function AdminScheduleGrid() {
     const startSec = addForm.startTime + ':00'
     const endSec   = addForm.endTime   + ':00'
 
-    // ── 1. Conflicto con slots ACTIVOS o BLOQUEADOS → error claro ──
+    // ── 1. Conflictos con slots ACTIVOS o BLOQUEADOS → pedir confirmación ──
     const activeConflicts = timeSlots.filter(s =>
       s.exhibitor_id === selectedExhibitor &&
       s.day_of_week  === dayNum &&
@@ -254,10 +254,24 @@ export default function AdminScheduleGrid() {
       const labels = activeConflicts
         .map(s => formatTimeLabel(s.start_time, s.end_time))
         .join(', ')
-      setAddingSaving(false)
-      setShowAddModal(false)
-      setMessage({ type: 'error', text: `⚠️ No se puede crear: se solapa con ${labels} (activo/bloqueado).` })
-      return
+      const ok = confirm(
+        `⚠️ Para crear este bloque se eliminarán los siguientes bloques existentes:\n${labels}\n\n¿Deseas continuar?`
+      )
+      if (!ok) {
+        setAddingSaving(false)
+        return
+      }
+      // Eliminar los bloques activos/bloqueados usando RPC (valida que no tengan reservas activas)
+      const delResults = await Promise.all(
+        activeConflicts.map(s => supabase.rpc('eliminar_time_slot', { p_slot_id: s.id }))
+      )
+      const failedDel = delResults.find(r => r.error)
+      if (failedDel) {
+        setAddingSaving(false)
+        setShowAddModal(false)
+        setMessage({ type: 'error', text: '⚠️ No se puede crear: uno de los bloques tiene reservas activas y no puede eliminarse.' })
+        return
+      }
     }
 
     // ── 2. Slots INACTIVOS que se solapan → eliminar antes de crear ─
@@ -687,6 +701,9 @@ export default function AdminScheduleGrid() {
                       <td key={dayNum} className="px-2 py-2 text-center">
                         <div className="relative group">
                           <div className="bg-purple-100 text-purple-700 rounded-lg px-2 py-3 text-xs font-bold border-2 border-purple-300">
+                            <div className="text-[10px] font-semibold text-purple-500 mb-0.5">
+                              {formatTimeLabel(slot.start_time, slot.end_time)}
+                            </div>
                             🔒 {slot.block_reason}
                           </div>
                           <button
@@ -714,6 +731,9 @@ export default function AdminScheduleGrid() {
                               : 'bg-gray-100 text-gray-400 border-gray-200 hover:bg-gray-200'
                           }`}
                         >
+                          <div className={`text-[10px] font-semibold mb-0.5 ${slot.is_active ? 'text-green-500' : 'text-gray-400'}`}>
+                            {formatTimeLabel(slot.start_time, slot.end_time)}
+                          </div>
                           {slot.is_active ? '✓ Activo' : '✕ Inactivo'}
                         </button>
                         {/* Botón eliminar: aparece al hover, llama al servidor (Fase 5) */}
