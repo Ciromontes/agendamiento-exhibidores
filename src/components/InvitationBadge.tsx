@@ -103,19 +103,32 @@ export default function InvitationBadge() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id])
 
-  // Intervalo 30s: solo para actualizar los countdowns en pantalla
-  // (los datos en sí llegan por Realtime)
+  // Intervalo 15s: actualiza countdowns Y recarga datos como red de seguridad
+  // en caso de que Realtime no entregue el UPDATE (ej. conexión inestable).
   useEffect(() => {
-    const interval = setInterval(() => setTick(t => t + 1), 30_000)
+    const interval = setInterval(() => {
+      setTick(t => t + 1)
+      fetchInvitations()
+    }, 15_000)
     return () => clearInterval(interval)
-  }, [])
+  }, [fetchInvitations])
 
   // ─── Ejecutar aceptación (sin verificación de conflicto) ─────
   const doAccept = async (invitationId: string) => {
     const { data, error } = await supabase
       .rpc('accept_invitation', { p_invitation_id: invitationId })
     if (error || !data?.success) {
-      alert('No se pudo aceptar: ' + (data?.error ?? error?.message ?? 'Error desconocido'))
+      const msg: string = data?.error ?? error?.message ?? ''
+      // Detectar si el turno ya fue tomado por otro usuario (race condition)
+      const takenByOther =
+        msg.includes('espacio') ||
+        msg.includes('ya procesada') ||
+        msg.includes('no encontrada')
+      alert(
+        takenByOther
+          ? 'Lo sentimos, este turno ya fue agendado por otro usuario.'
+          : 'No se pudo aceptar: ' + (msg || 'Error desconocido')
+      )
     } else {
       // Notificar a ExhibitorGrid que recargue su grilla sin refrescar página
       window.dispatchEvent(new Event('exhibitor-grid-refresh'))

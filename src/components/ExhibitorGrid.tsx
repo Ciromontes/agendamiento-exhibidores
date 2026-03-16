@@ -1073,6 +1073,17 @@ export default function ExhibitorGrid() {
         .eq('id', otherReservation.id)
     }
 
+    // Cancelar automáticamente todas las invitaciones pendientes que el usuario
+    // envió para este slot+semana. Los receptores dejarán de verlas al instante
+    // gracias a la suscripción Realtime de InvitationBadge.
+    await supabase
+      .from('invitations')
+      .update({ status: 'declined' })
+      .eq('from_user_id', user!.id)
+      .eq('slot_id', myReservation.time_slot_id)
+      .eq('week_start', weekStart)
+      .eq('status', 'pending')
+
     await loadData()
     await loadMonthlyReservations()  // Fase 4: recargar conteo mensual
   }
