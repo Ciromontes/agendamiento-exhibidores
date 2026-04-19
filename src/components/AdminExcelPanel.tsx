@@ -154,7 +154,7 @@ export default function AdminExcelPanel() {
   }
 
   // =============================================================
-  // Subir Excel de reservas (se aplica a la semana siguiente)
+  // Subir Excel de reservas (se aplica a la semana indicada en el archivo)
   // =============================================================
   const handleUploadReservations = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -179,7 +179,7 @@ export default function AdminExcelPanel() {
       if (!res.ok && res.status !== 422) {
         setError(json.error ?? `Error ${res.status}`)
       } else {
-        setResultTitle('📋 Resultado de la importación de reservas (semana siguiente)')
+        setResultTitle('📋 Resultado de la importación de reservas')
         setResult(json as ImportResult)
       }
     } catch {
@@ -201,7 +201,7 @@ export default function AdminExcelPanel() {
           📊 Importar / Exportar (Excel)
         </h2>
         <p className="text-sm text-gray-500 mt-1">
-          Descarga usuarios o reservas actuales, y sube Excel para usuarios o para reservar automáticamente la semana siguiente.
+          Descarga usuarios o reservas actuales, y sube Excel para usuarios o para aplicar reservas en la semana indicada en el archivo.
         </p>
       </div>
 
@@ -224,11 +224,11 @@ export default function AdminExcelPanel() {
           </button>
         </div>
 
-        {/* Subir reservas (semana siguiente) */}
+        {/* Subir reservas (semana del archivo) */}
         <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
-          <h3 className="font-semibold text-gray-700 mb-2">⬆️ Subir reservas (semana siguiente)</h3>
+          <h3 className="font-semibold text-gray-700 mb-2">⬆️ Subir reservas (semana del archivo)</h3>
           <p className="text-sm text-gray-500 mb-4">
-            Sube el Excel modificado para aplicar usuarios/acompañantes a la próxima semana.
+            Sube el Excel modificado para aplicar usuarios/acompañantes a la semana indicada en la columna <strong>semana</strong>.
           </p>
           <label
             className={`block w-full text-center px-4 py-2.5 rounded-lg font-medium
@@ -432,7 +432,7 @@ export default function AdminExcelPanel() {
           </div>
 
           <div className="border-t border-gray-200 pt-4">
-            <h4 className="font-medium text-gray-700 mb-1">Flujo recomendado (reservas de semana siguiente):</h4>
+            <h4 className="font-medium text-gray-700 mb-1">Flujo recomendado (reservas):</h4>
             <ol className="list-decimal list-inside space-y-1">
               <li>Descarga <strong>reservas actuales</strong>.</li>
               <li>Edita: <strong>usuario</strong>, <strong>acompanante</strong> y opcionalmente <strong>bloqueado</strong>.</li>
@@ -440,8 +440,8 @@ export default function AdminExcelPanel() {
               <li>No necesitas escribir estados como Libre/Parcial/Completo; el sistema lo deduce automáticamente.</li>
               <li>Para bloquear usa <strong>No disponible</strong> (o Bloqueado). Para desbloquear usa <strong>Disponible</strong> (o No).</li>
               <li>En turnos bloqueados verás <strong>No disponible</strong> en usuario/acompañante.</li>
-              <li>Sube el archivo con <strong>Subir reservas (semana siguiente)</strong>.</li>
-              <li>El sistema validará nombres/horarios y aplicará el resultado a la próxima semana.</li>
+              <li>Sube el archivo con <strong>Subir reservas (semana del archivo)</strong>.</li>
+              <li>El sistema validará nombres/horarios y aplicará el resultado a la semana indicada en la columna <strong>semana</strong>.</li>
             </ol>
             <p className="text-xs text-gray-500 mt-2">
               Los errores se reportan con formato: <strong>Fila X, columna Y</strong> para corregir rápido.

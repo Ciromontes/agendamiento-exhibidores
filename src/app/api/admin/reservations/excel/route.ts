@@ -107,6 +107,28 @@ function addDays(dateStr: string, days: number): string {
   return d.toISOString().split('T')[0]
 }
 
+function parseWeekDate(value: unknown): string | null {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return value.toISOString().split('T')[0]
+  }
+
+  // Excel serial date (days since 1899-12-30)
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    const excelEpoch = new Date(Date.UTC(1899, 11, 30))
+    const d = new Date(excelEpoch.getTime() + Math.round(value) * 86400000)
+    if (!Number.isNaN(d.getTime())) return d.toISOString().split('T')[0]
+  }
+
+  const raw = String(value ?? '').trim()
+  if (!raw) return null
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) return raw
+
+  const parsed = new Date(raw)
+  if (Number.isNaN(parsed.getTime())) return null
+  return parsed.toISOString().split('T')[0]
+}
+
 function normalizeText(value: unknown): string {
   return String(value ?? '')
     .trim()
@@ -353,6 +375,11 @@ export async function GET(req: NextRequest) {
   const rows = sortedSlots.map((slot) => {
     const occ = reservationMap.get(slot.id) ?? { pos1: '', pos2: '' }
     const blockedLabel = slot.is_active ? '' : 'No disponible'
+    const rawReason = String(slot.block_reason ?? '').trim()
+    const normalizedReason = normalizeText(rawReason)
+    const reasonLabel = !slot.is_active && (!rawReason || normalizedReason === 'bloqueado desde excel')
+      ? 'No disponible'
+      : rawReason
 
     return {
       semana: activeWeek,
@@ -362,7 +389,7 @@ export async function GET(req: NextRequest) {
       usuario: slot.is_active ? occ.pos1 : 'No disponible',
       acompanante: slot.is_active ? occ.pos2 : 'No disponible',
       bloqueado: blockedLabel,
-      motivo_bloqueo: slot.block_reason ?? '',
+      motivo_bloqueo: reasonLabel,
     }
   })
 
@@ -450,7 +477,26 @@ export async function POST(req: NextRequest) {
   }
 
   const sourceWeek = cfg.active_week_start as string
-  const targetWeek = addDays(sourceWeek, 7)
+  const defaultTargetWeek = addDays(sourceWeek, 7)
+
+  const detectedWeeks = new Set<string>()
+  for (const row of rows) {
+    const weekValue = row.semana ?? row.week_start ?? row.week
+    const parsedWeek = parseWeekDate(weekValue)
+    if (parsedWeek) detectedWeeks.add(parsedWeek)
+  }
+
+  if (detectedWeeks.size > 1) {
+    return NextResponse.json(
+      {
+        error:
+          'El archivo mezcla varias semanas en la columna "semana". Usa una sola semana por archivo.',
+      },
+      { status: 422 },
+    )
+  }
+
+  const targetWeek = detectedWeeks.size === 1 ? Array.from(detectedWeeks)[0] : defaultTargetWeek
 
   const { data: exhibitors, error: exhibError } = await supabase
     .from('exhibitors')
@@ -638,7 +684,7 @@ export async function POST(req: NextRequest) {
 
     if (blockedInstruction.value !== null) {
       if (blockedInstruction.value) {
-        const reasonToSave = blockReasonRaw || slot.block_reason || 'Bloqueado desde Excel'
+        const reasonToSave = blockReasonRaw || slot.block_reason || 'No disponible'
         slotUpdates.set(slot.id, { is_active: false, block_reason: reasonToSave })
       } else {
         slotUpdates.set(slot.id, { is_active: true, block_reason: null })
