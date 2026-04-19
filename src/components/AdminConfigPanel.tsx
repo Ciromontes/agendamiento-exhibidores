@@ -45,6 +45,8 @@ type ConfigData = {
   last_week_compensation: boolean
 }
 
+type WeekActionMode = 'reset_current' | 'advance_blank' | 'advance_keep'
+
 export default function AdminConfigPanel() {
   // ─── Estado ────────────────────────────────────────────────
   const [config, setConfig] = useState<ConfigData | null>(null)
@@ -62,10 +64,10 @@ export default function AdminConfigPanel() {
   // Estado de guardado de horas mínimas de anticipación (Step 1.2)
   const [advanceSaving, setAdvanceSaving] = useState(false)
   const [advanceSavedMsg, setAdvanceSavedMsg] = useState(false)
-  // Estado de guardado de la semana activa
-  const [weekSaving, setWeekSaving] = useState(false)
-  const [weekSavedMsg, setWeekSavedMsg] = useState(false)
-  const [confirmAdvance, setConfirmAdvance] = useState(false)
+  // Estado del bloque práctico de semana
+  const [weekActionLoading, setWeekActionLoading] = useState<WeekActionMode | null>(null)
+  const [weekActionMsg, setWeekActionMsg] = useState<string | null>(null)
+  const [weekActionError, setWeekActionError] = useState<string | null>(null)
   // Estado de guardado de límites de relevos por mes (Step 3.1)
   const [reliefLimitSaving, setReliefLimitSaving] = useState(false)
   const [reliefLimitSavedMsg, setReliefLimitSavedMsg] = useState(false)
@@ -76,6 +78,7 @@ export default function AdminConfigPanel() {
   const supabase = createClient()
   const { user } = useUser()
   const congregationId = user?.congregation_id ?? ''
+  const accessKey = user?.access_key ?? ''
 
   // ─── Cargar configuración actual ───────────────────────────
   useEffect(() => {
@@ -95,39 +98,63 @@ export default function AdminConfigPanel() {
     fetchConfig()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [congregationId])
-  // ─── Avanzar semana activa ────────────────────────────────
-  const handleAdvanceWeek = async () => {
-    if (!config) return
-    // Ventana de avance: solo desde el día configurado hasta el domingo (vie→sáb→dom)
-    const DAY_NAMES = ['domingo','lunes','martes','miércoles','jueves','viernes','sábado']
-    const todayDay = new Date().getDay()
-    const d = config.booking_opens_day
-    const allowed = [d % 7, (d + 1) % 7, (d + 2) % 7]
-    if (!allowed.includes(todayDay)) {
-      alert(
-        `El avance de semana solo puede realizarse desde el ${DAY_NAMES[d]} hasta el domingo.\n` +
-        `Hoy es ${DAY_NAMES[todayDay]} y aún no ha llegado ese momento.`
-      )
+  // ─── Acciones rápidas de semana (modo pruebas) ─────────────
+  const handleWeekQuickAction = async (mode: WeekActionMode) => {
+    if (!config || !accessKey) return
+
+    const actionText: Record<WeekActionMode, string> = {
+      reset_current: 'reiniciar la semana en curso y dejar todos los turnos en cero',
+      advance_blank: 'abrir la nueva semana en blanco (sin reservas)',
+      advance_keep: 'abrir la nueva semana manteniendo los cupos actuales',
+    }
+
+    const ok = window.confirm(
+      `¿Seguro que deseas ${actionText[mode]}?\n\n` +
+      'Esta acción es de administración y puede afectar a todos los usuarios de tu congregación.'
+    )
+    if (!ok) return
+
+    const securityWord = window.prompt('Escribe REINICIAR para confirmar')
+    if ((securityWord ?? '').trim().toUpperCase() !== 'REINICIAR') {
+      alert('Confirmación inválida. Operación cancelada.')
       return
     }
-    setWeekSaving(true)
-    const next = new Date(config.active_week_start + 'T12:00:00')
-    next.setDate(next.getDate() + 7)
-    const nextStr = next.toISOString().split('T')[0]
-    const { error } = await supabase
-      .from('app_config')
-      .update({ active_week_start: nextStr })
-      .eq('id', config.id)
-      .eq('congregation_id', congregationId)
-    if (error) {
-      alert('Error al avanzar semana: ' + error.message)
-    } else {
-      setConfig(c => c ? { ...c, active_week_start: nextStr } : c)
-      setWeekSavedMsg(true)
-      setConfirmAdvance(false)
-      setTimeout(() => setWeekSavedMsg(false), 4000)
+
+    setWeekActionLoading(mode)
+    setWeekActionMsg(null)
+    setWeekActionError(null)
+
+    try {
+      const res = await fetch('/api/admin/week/reset', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-access-key': accessKey,
+        },
+        body: JSON.stringify({ mode }),
+      })
+
+      const json = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        setWeekActionError(json.error ?? `Error ${res.status}`)
+        return
+      }
+
+      if (json.active_week_start) {
+        setConfig(c => c ? { ...c, active_week_start: json.active_week_start as string } : c)
+      }
+
+      setWeekActionMsg(
+        typeof json.message === 'string'
+          ? json.message
+          : 'Operación de semana ejecutada correctamente.'
+      )
+    } catch {
+      setWeekActionError('Error de conexión al ejecutar la acción de semana.')
+    } finally {
+      setWeekActionLoading(null)
     }
-    setWeekSaving(false)
   }
   // ─── Guardar cambio de modo ────────────────────────────────
   const handleModeChange = async (newMode: 'weekly' | 'monthly') => {
@@ -307,13 +334,6 @@ export default function AdminConfigPanel() {
   }
   const weekInfo = fmtWeekRange(config.active_week_start)
 
-  // ¿Está dentro de la ventana de avance? (vie, sáb o dom)
-  const canAdvanceToday = (() => {
-    const todayDay = new Date().getDay()
-    const d = config.booking_opens_day
-    return [d % 7, (d + 1) % 7, (d + 2) % 7].includes(todayDay)
-  })()
-
   return (
     <div className="space-y-6">
 
@@ -321,11 +341,10 @@ export default function AdminConfigPanel() {
           SECCIÓN 0: SEMANA ACTIVA
           ══════════════════════════════════════════════════ */}
       <div className="bg-white rounded-xl shadow-md p-6">
-        <h2 className="text-lg font-bold text-gray-800 mb-1">📅 Semana Activa de Reservas</h2>
+        <h2 className="text-lg font-bold text-gray-800 mb-1">🔄 Gestión práctica de semana</h2>
         <p className="text-sm text-gray-500 mb-5">
-          Controla manualmente para qué semana están abiertas las reservas.
-          Cuando termina una semana, avanza al siguiente período con el botón.
-          Las semanas anteriores quedan guardadas en el historial.
+          Bloque rápido para pruebas y operación diaria como administrador.
+          Estas acciones se aplican solo a tu congregación y piden doble confirmación de seguridad.
         </p>
 
         {/* Semana actual */}
@@ -335,62 +354,65 @@ export default function AdminConfigPanel() {
           <p className="text-xs text-indigo-500 mt-0.5 capitalize">Empieza el {weekInfo.full}</p>
         </div>
 
-        {/* Confirmación de avance */}
-        {!confirmAdvance ? (
-          <div>
-            <button
-              onClick={() => setConfirmAdvance(true)}
-              disabled={!canAdvanceToday}
-              title={!canAdvanceToday
-                ? `Solo disponible desde el ${['domingo','lunes','martes','miércoles','jueves','viernes','sábado'][config.booking_opens_day]} hasta el domingo`
-                : undefined}
-              className={`w-full sm:w-auto px-6 py-2.5 rounded-xl text-sm font-semibold transition shadow-sm ${
-                canAdvanceToday
-                  ? 'bg-emerald-600 hover:bg-emerald-700 text-white'
-                  : 'bg-gray-200 text-gray-400 cursor-not-allowed opacity-60'
-              }`}
-            >
-              Abrir siguiente semana →
-            </button>
-            {!canAdvanceToday && (
-              <p className="mt-2 text-xs text-gray-500">
-                🔒 El avance está disponible desde el{' '}
-                <strong>{['domingo','lunes','martes','miércoles','jueves','viernes','sábado'][config.booking_opens_day]}</strong>{' '}
-                hasta el domingo.
-              </p>
-            )}
-          </div>
-        ) : (
-          <div className="bg-amber-50 border border-amber-300 rounded-xl p-4 space-y-3">
-            <p className="text-sm font-semibold text-amber-800">
-              ⚠️ ¿Confirmas abrir la semana del <strong className="capitalize">{weekInfo.nextRange}</strong>?
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <button
+            onClick={() => handleWeekQuickAction('reset_current')}
+            disabled={weekActionLoading !== null}
+            className="text-left rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 hover:bg-amber-100 transition disabled:opacity-60"
+          >
+            <p className="text-sm font-bold text-amber-800">Reiniciar semana en curso</p>
+            <p className="text-xs text-amber-700 mt-1">
+              Deja la semana actual en cero: cancela reservas activas y pendientes operativas.
             </p>
-            <p className="text-xs text-amber-600">
-              La semana actual ({weekInfo.range}) pasará al historial. Los usuarios verán los turnos de la nueva semana.
+            <p className="text-[11px] text-amber-600 mt-2">
+              {weekActionLoading === 'reset_current' ? 'Procesando...' : '⚠️ Pide confirmación de seguridad'}
             </p>
-            <div className="flex gap-3">
-              <button
-                onClick={handleAdvanceWeek}
-                disabled={weekSaving}
-                className="bg-emerald-600 hover:bg-emerald-700 disabled:bg-gray-300 text-white px-5 py-2 rounded-lg text-sm font-semibold transition"
-              >
-                {weekSaving ? 'Guardando...' : '✅ Sí, abrir nueva semana'}
-              </button>
-              <button
-                onClick={() => setConfirmAdvance(false)}
-                className="text-gray-500 hover:text-gray-700 text-sm px-3 py-2"
-              >
-                Cancelar
-              </button>
-            </div>
+          </button>
+
+          <button
+            onClick={() => handleWeekQuickAction('advance_blank')}
+            disabled={weekActionLoading !== null}
+            className="text-left rounded-xl border border-red-200 bg-red-50 px-4 py-3 hover:bg-red-100 transition disabled:opacity-60"
+          >
+            <p className="text-sm font-bold text-red-800">Abrir nueva semana en blanco</p>
+            <p className="text-xs text-red-700 mt-1">
+              Avanza a <strong className="capitalize">{weekInfo.nextRange}</strong> y deja turnos vacíos.
+            </p>
+            <p className="text-[11px] text-red-600 mt-2">
+              {weekActionLoading === 'advance_blank' ? 'Procesando...' : '⚠️ Pide confirmación de seguridad'}
+            </p>
+          </button>
+
+          <button
+            onClick={() => handleWeekQuickAction('advance_keep')}
+            disabled={weekActionLoading !== null}
+            className="text-left rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 hover:bg-emerald-100 transition disabled:opacity-60"
+          >
+            <p className="text-sm font-bold text-emerald-800">Abrir nueva semana manteniendo cupos</p>
+            <p className="text-xs text-emerald-700 mt-1">
+              Avanza a <strong className="capitalize">{weekInfo.nextRange}</strong> copiando reservas actuales.
+            </p>
+            <p className="text-[11px] text-emerald-600 mt-2">
+              {weekActionLoading === 'advance_keep' ? 'Procesando...' : '⚠️ Pide confirmación de seguridad'}
+            </p>
+          </button>
+        </div>
+
+        {weekActionMsg && (
+          <div className="mt-4 bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg px-4 py-2">
+            ✅ {weekActionMsg}
           </div>
         )}
 
-        {weekSavedMsg && (
-          <div className="mt-3 bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg px-4 py-2">
-            ✅ Semana avanzada. Los usuarios ya ven los turnos de la nueva semana.
+        {weekActionError && (
+          <div className="mt-4 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-2">
+            ❌ {weekActionError}
           </div>
         )}
+
+        <p className="mt-3 text-xs text-gray-500">
+          Este bloque ignora la ventana normal de apertura para facilitar pruebas controladas por administración.
+        </p>
       </div>
 
       {/* Tarjeta principal: Modo de Conteo */}
