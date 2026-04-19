@@ -323,9 +323,12 @@ export default function AdminConfigPanel() {
     const start = new Date(weekStart + 'T12:00:00')
     const end   = new Date(weekStart + 'T12:00:00')
     end.setDate(end.getDate() + 6)
+    const nextStartDate = new Date(start)
+    nextStartDate.setDate(nextStartDate.getDate() + 7)
     return {
       full: start.toLocaleDateString('es-CO', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }),
       range: `${start.toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })} – ${end.toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' })}`,
+      nextStart: nextStartDate.toISOString().split('T')[0],
       nextRange: (() => {
         const ns = new Date(start); ns.setDate(ns.getDate() + 7)
         const ne = new Date(ns);    ne.setDate(ne.getDate() + 6)
@@ -333,7 +336,30 @@ export default function AdminConfigPanel() {
       })(),
     }
   }
+
+  function getCalendarNextWeekInfo() {
+    const today = new Date()
+    today.setHours(12, 0, 0, 0)
+    const day = today.getDay() // 0=domingo
+    const diffToMonday = day === 0 ? -6 : 1 - day
+
+    const currentWeekStart = new Date(today)
+    currentWeekStart.setDate(currentWeekStart.getDate() + diffToMonday)
+
+    const nextWeekStart = new Date(currentWeekStart)
+    nextWeekStart.setDate(nextWeekStart.getDate() + 7)
+
+    const nextWeekEnd = new Date(nextWeekStart)
+    nextWeekEnd.setDate(nextWeekEnd.getDate() + 6)
+
+    return {
+      start: nextWeekStart.toISOString().split('T')[0],
+      range: `${nextWeekStart.toLocaleDateString('es-CO', { day: 'numeric', month: 'short' })} – ${nextWeekEnd.toLocaleDateString('es-CO', { day: 'numeric', month: 'short', year: 'numeric' })}`,
+    }
+  }
   const weekInfo = fmtWeekRange(config.active_week_start)
+  const quickTargetWeek = getCalendarNextWeekInfo()
+  const showCalendarMismatch = weekInfo.nextStart !== quickTargetWeek.start
 
   return (
     <div className="space-y-6">
@@ -355,6 +381,15 @@ export default function AdminConfigPanel() {
           <p className="text-xs text-indigo-500 mt-0.5 capitalize">Empieza el {weekInfo.full}</p>
         </div>
 
+        {showCalendarMismatch && (
+          <div className="mb-5 bg-amber-50 border border-amber-200 rounded-xl px-4 py-3">
+            <p className="text-sm font-semibold text-amber-800">⚠️ Ajuste automático de calendario activo</p>
+            <p className="text-xs text-amber-700 mt-1">
+              Las acciones rápidas operarán sobre la próxima semana calendario: <strong className="capitalize">{quickTargetWeek.range}</strong>.
+            </p>
+          </div>
+        )}
+
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
           <button
             onClick={() => handleWeekQuickAction('advance_only')}
@@ -363,7 +398,7 @@ export default function AdminConfigPanel() {
           >
             <p className="text-sm font-bold text-indigo-800">Abrir siguiente semana (sin tocar cupos)</p>
             <p className="text-xs text-indigo-700 mt-1">
-              Avanza a <strong className="capitalize">{weekInfo.nextRange}</strong> respetando reservas ya cargadas.
+              Avanza a <strong className="capitalize">{quickTargetWeek.range}</strong> respetando reservas ya cargadas.
             </p>
             <p className="text-[11px] text-indigo-600 mt-2">
               {weekActionLoading === 'advance_only' ? 'Procesando...' : '⚠️ Pide confirmación de seguridad'}
@@ -391,7 +426,7 @@ export default function AdminConfigPanel() {
           >
             <p className="text-sm font-bold text-red-800">Abrir nueva semana en blanco</p>
             <p className="text-xs text-red-700 mt-1">
-              Avanza a <strong className="capitalize">{weekInfo.nextRange}</strong> y deja turnos vacíos.
+              Avanza a <strong className="capitalize">{quickTargetWeek.range}</strong> y deja turnos vacíos.
             </p>
             <p className="text-[11px] text-red-600 mt-2">
               {weekActionLoading === 'advance_blank' ? 'Procesando...' : '⚠️ Pide confirmación de seguridad'}
@@ -405,7 +440,7 @@ export default function AdminConfigPanel() {
           >
             <p className="text-sm font-bold text-emerald-800">Abrir nueva semana manteniendo cupos</p>
             <p className="text-xs text-emerald-700 mt-1">
-              Avanza a <strong className="capitalize">{weekInfo.nextRange}</strong> copiando reservas actuales.
+              Avanza a <strong className="capitalize">{quickTargetWeek.range}</strong> copiando reservas actuales.
             </p>
             <p className="text-[11px] text-emerald-600 mt-2">
               {weekActionLoading === 'advance_keep' ? 'Procesando...' : '⚠️ Pide confirmación de seguridad'}

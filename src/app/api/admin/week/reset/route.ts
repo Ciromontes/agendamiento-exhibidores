@@ -24,6 +24,15 @@ function addDays(dateStr: string, days: number): string {
   return d.toISOString().split('T')[0]
 }
 
+function getCurrentWeekStartFromToday(): string {
+  const d = new Date()
+  d.setHours(12, 0, 0, 0)
+  const day = d.getDay() // 0=domingo, 1=lunes, ...
+  const diffToMonday = day === 0 ? -6 : 1 - day
+  d.setDate(d.getDate() + diffToMonday)
+  return d.toISOString().split('T')[0]
+}
+
 function isWeekActionMode(value: unknown): value is WeekActionMode {
   return (
     value === 'reset_current' ||
@@ -70,7 +79,8 @@ export async function POST(req: NextRequest) {
   }
 
   const currentWeek = cfg.active_week_start as string
-  const nextWeek = addDays(currentWeek, 7)
+  const calendarCurrentWeek = getCurrentWeekStartFromToday()
+  const targetWeek = addDays(calendarCurrentWeek, 7)
 
   if (body.mode === 'reset_current') {
     const [{ error: reservationsError }, { error: invitationsError }, { error: reliefError }] = await Promise.all([
@@ -127,28 +137,28 @@ export async function POST(req: NextRequest) {
         .from('reservations')
         .update({ status: 'cancelled' })
         .eq('congregation_id', admin.congregation_id)
-        .gte('week_start', currentWeek)
+        .eq('week_start', targetWeek)
         .neq('status', 'cancelled'),
       supabase
         .from('invitations')
         .update({ status: 'declined' })
         .eq('congregation_id', admin.congregation_id)
-        .gte('week_start', currentWeek)
+        .eq('week_start', targetWeek)
         .eq('status', 'pending'),
       supabase
         .from('relief_requests')
         .update({ status: 'cancelled' })
         .eq('congregation_id', admin.congregation_id)
-        .gte('week_start', currentWeek)
+        .eq('week_start', targetWeek)
         .eq('status', 'pending'),
       supabase
         .from('absences')
         .delete()
         .eq('congregation_id', admin.congregation_id)
-        .gte('week_start', currentWeek),
+        .eq('week_start', targetWeek),
       supabase
         .from('app_config')
-        .update({ active_week_start: nextWeek })
+        .update({ active_week_start: targetWeek })
         .eq('id', cfg.id)
         .eq('congregation_id', admin.congregation_id),
     ])
@@ -171,15 +181,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       mode: body.mode,
-      active_week_start: nextWeek,
-      message: 'Nueva semana abierta en blanco. Reservas reiniciadas desde la semana activa.',
+      active_week_start: targetWeek,
+      message: 'Nueva semana abierta en blanco. Solo se limpió la próxima semana calendario.',
     })
   }
 
   if (body.mode === 'advance_only') {
     const { error: cfgUpdateError } = await supabase
       .from('app_config')
-      .update({ active_week_start: nextWeek })
+      .update({ active_week_start: targetWeek })
       .eq('id', cfg.id)
       .eq('congregation_id', admin.congregation_id)
 
@@ -193,8 +203,8 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       mode: body.mode,
-      active_week_start: nextWeek,
-      message: 'Semana avanzada sin modificar reservas existentes.',
+      active_week_start: targetWeek,
+      message: 'Semana avanzada a la próxima semana calendario sin modificar reservas existentes.',
     })
   }
 
@@ -202,7 +212,7 @@ export async function POST(req: NextRequest) {
     .from('reservations')
     .select('time_slot_id, user_id, slot_position')
     .eq('congregation_id', admin.congregation_id)
-    .eq('week_start', currentWeek)
+    .eq('week_start', calendarCurrentWeek)
     .neq('status', 'cancelled')
 
   if (sourceError) {
@@ -215,25 +225,25 @@ export async function POST(req: NextRequest) {
         .from('reservations')
         .update({ status: 'cancelled' })
         .eq('congregation_id', admin.congregation_id)
-        .eq('week_start', nextWeek)
+        .eq('week_start', targetWeek)
         .neq('status', 'cancelled'),
       supabase
         .from('invitations')
         .update({ status: 'declined' })
         .eq('congregation_id', admin.congregation_id)
-        .eq('week_start', nextWeek)
+        .eq('week_start', targetWeek)
         .eq('status', 'pending'),
       supabase
         .from('relief_requests')
         .update({ status: 'cancelled' })
         .eq('congregation_id', admin.congregation_id)
-        .eq('week_start', nextWeek)
+        .eq('week_start', targetWeek)
         .eq('status', 'pending'),
       supabase
         .from('absences')
         .delete()
         .eq('congregation_id', admin.congregation_id)
-        .eq('week_start', nextWeek),
+        .eq('week_start', targetWeek),
     ])
 
   if (clearReservationsError || clearInvitationsError || clearReliefError || clearAbsencesError) {
@@ -253,7 +263,7 @@ export async function POST(req: NextRequest) {
   const copyRows = (sourceReservations ?? []).map((r) => ({
     time_slot_id: r.time_slot_id,
     user_id: r.user_id,
-    week_start: nextWeek,
+    week_start: targetWeek,
     status: 'confirmed',
     slot_position: r.slot_position,
     congregation_id: admin.congregation_id,
@@ -271,7 +281,7 @@ export async function POST(req: NextRequest) {
 
   const { error: configError } = await supabase
     .from('app_config')
-    .update({ active_week_start: nextWeek })
+    .update({ active_week_start: targetWeek })
     .eq('id', cfg.id)
     .eq('congregation_id', admin.congregation_id)
 
@@ -285,8 +295,8 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({
     ok: true,
     mode: body.mode,
-    active_week_start: nextWeek,
+    active_week_start: targetWeek,
     copied: copyRows.length,
-    message: `Nueva semana abierta conservando cupos. Reservas copiadas: ${copyRows.length}.`,
+    message: `Nueva semana abierta conservando cupos en la próxima semana calendario. Reservas copiadas: ${copyRows.length}.`,
   })
 }
