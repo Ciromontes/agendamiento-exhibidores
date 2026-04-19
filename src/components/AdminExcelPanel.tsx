@@ -258,9 +258,9 @@ function formatWeekRange(weekStart: string, weekEnd: string): string {
   return `${start.toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' })} - ${end.toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' })}`
 }
 
-function getVisualReportWidth(layout: VisualReportLayout, fontSize = 14): number {
-  const normalized = Math.max(14, Math.min(24, fontSize))
-  const extra = normalized - 14
+function getVisualReportWidth(layout: VisualReportLayout, fontSize = 18): number {
+  const normalized = Math.max(18, Math.min(40, fontSize))
+  const extra = normalized - 18
 
   if (layout === 'side_by_side') {
     return 1480 + extra * 36
@@ -271,7 +271,7 @@ function getVisualReportWidth(layout: VisualReportLayout, fontSize = 14): number
 
 function buildVisualReportHtml(report: VisualReportPayload, options: VisualReportOptions): string {
   const theme = VISUAL_THEMES[options.theme]
-  const bodyFont = Math.max(14, Math.min(24, options.fontSize))
+  const bodyFont = Math.max(18, Math.min(40, options.fontSize))
   const rootWidth = getVisualReportWidth(options.layout, bodyFont)
   const titleFont = Math.max(34, Math.min(56, bodyFont + 18))
   const subtitleFont = Math.max(16, bodyFont + 2)
@@ -280,12 +280,12 @@ function buildVisualReportHtml(report: VisualReportPayload, options: VisualRepor
   const summaryLabelFont = Math.max(12, bodyFont - 2)
   const summaryValueFont = Math.max(24, bodyFont + 8)
   const exhibitorTitleFont = Math.max(20, bodyFont + 5)
-  const rootPadding = 24 + Math.round((bodyFont - 14) * 0.9)
-  const headerPadY = 24 + Math.round((bodyFont - 14) * 0.8)
-  const headerPadX = 28 + Math.round((bodyFont - 14) * 0.7)
-  const sectionPadding = 18 + Math.round((bodyFont - 14) * 0.6)
-  const tableCellPadY = Math.max(6, Math.round(5 + (bodyFont - 14) * 0.35))
-  const tableCellPadX = Math.max(7, Math.round(6 + (bodyFont - 14) * 0.3))
+  const rootPadding = 24 + Math.round((bodyFont - 18) * 0.9)
+  const headerPadY = 24 + Math.round((bodyFont - 18) * 0.8)
+  const headerPadX = 28 + Math.round((bodyFont - 18) * 0.7)
+  const sectionPadding = 18 + Math.round((bodyFont - 18) * 0.6)
+  const tableCellPadY = Math.max(6, Math.round(5 + (bodyFont - 18) * 0.35))
+  const tableCellPadX = Math.max(7, Math.round(6 + (bodyFont - 18) * 0.3))
   const groupsTemplate =
     options.layout === 'side_by_side' ? 'repeat(2, minmax(0, 1fr))' : 'minmax(0, 1fr)'
   const layoutLabel = options.layout === 'side_by_side' ? 'Tablas lado a lado' : 'Tablas en linea'
@@ -306,7 +306,7 @@ function buildVisualReportHtml(report: VisualReportPayload, options: VisualRepor
         .map((row) => {
           const companion = row.companion_name
             ? `<span>${escapeHtml(row.companion_name)}</span>`
-            : '<span class="muted">Sin acompanante</span>'
+            : '<span class="muted">Sin asignar</span>'
 
           return `
             <tr>
@@ -327,8 +327,8 @@ function buildVisualReportHtml(report: VisualReportPayload, options: VisualRepor
               <tr>
                 <th>Dia</th>
                 <th>Horario</th>
-                <th>Usuario principal</th>
-                <th>Acompanante</th>
+                <th>Publicador A</th>
+                <th>Publicador B</th>
               </tr>
             </thead>
             <tbody>
@@ -540,7 +540,7 @@ export default function AdminExcelPanel() {
   const [downloading, setDownloading] = useState(false)
   const [downloadingReservations, setDownloadingReservations] = useState(false)
   const [downloadingVisual, setDownloadingVisual] = useState<'png' | 'pdf' | null>(null)
-  const [visualFontSize, setVisualFontSize] = useState(16)
+  const [visualFontSize, setVisualFontSize] = useState(18)
   const [visualTheme, setVisualTheme] = useState<VisualReportThemeKey>('soft_ocean')
   const [visualLayout, setVisualLayout] = useState<VisualReportLayout>('inline')
   const [uploading, setUploading] = useState(false)
@@ -840,7 +840,7 @@ export default function AdminExcelPanel() {
         <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
           <h3 className="font-semibold text-gray-700 mb-2">⬆️ Subir reservas (semana del archivo)</h3>
           <p className="text-sm text-gray-500 mb-4">
-            Sube el Excel modificado para aplicar usuarios/acompañantes a la semana indicada en la columna <strong>semana</strong>.
+            Sube el Excel modificado para aplicar Publicador A/Publicador B a la semana indicada en la columna <strong>semana</strong>.
           </p>
           <label
             className={`block w-full text-center px-4 py-2.5 rounded-lg font-medium
@@ -866,7 +866,7 @@ export default function AdminExcelPanel() {
         <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
           <h3 className="font-semibold text-gray-700 mb-2">📅 Descargar reservas actuales</h3>
           <p className="text-sm text-gray-500 mb-4">
-            Exporta la semana activa con la configuración actual (usuario y acompañante por turno).
+            Exporta la semana activa con la configuración actual (Publicador A y Publicador B por turno).
           </p>
           <button
             onClick={handleDownloadReservations}
@@ -920,15 +920,15 @@ export default function AdminExcelPanel() {
               </div>
               <input
                 type="range"
-                min={14}
-                max={24}
+                min={18}
+                max={40}
                 step={1}
                 value={visualFontSize}
                 onChange={(e) => setVisualFontSize(Number(e.target.value))}
                 className="w-full accent-blue-600"
               />
               <p className="text-[11px] text-gray-500 mt-1">
-                Rango permitido: 14 a 24.
+                Rango permitido: 18 a 40.
               </p>
             </div>
 
@@ -1158,11 +1158,11 @@ export default function AdminExcelPanel() {
             <h4 className="font-medium text-gray-700 mb-1">Flujo recomendado (reservas):</h4>
             <ol className="list-decimal list-inside space-y-1">
               <li>Descarga <strong>reservas actuales</strong>.</li>
-              <li>Edita: <strong>usuario</strong>, <strong>acompanante</strong> y opcionalmente <strong>bloqueado</strong>.</li>
-              <li>Deja usuario y acompañante vacíos para un turno libre.</li>
+              <li>Edita: <strong>publicador_a</strong>, <strong>publicador_b</strong> y opcionalmente <strong>bloqueado</strong>.</li>
+              <li>Deja Publicador A y Publicador B vacíos para un turno libre.</li>
               <li>No necesitas escribir estados como Libre/Parcial/Completo; el sistema lo deduce automáticamente.</li>
               <li>Para bloquear usa <strong>No Disponible</strong> (o Bloqueado). Para desbloquear usa <strong>Disponible</strong> (o No).</li>
-              <li>En turnos bloqueados verás <strong>No Disponible</strong> en usuario/acompañante.</li>
+              <li>En turnos bloqueados verás <strong>No Disponible</strong> en Publicador A/Publicador B.</li>
               <li>Sube el archivo con <strong>Subir reservas (semana del archivo)</strong>.</li>
               <li>El sistema validará nombres/horarios y aplicará el resultado a la semana indicada en la columna <strong>semana</strong>.</li>
             </ol>

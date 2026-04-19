@@ -9,7 +9,7 @@
  * Requiere header: x-access-key: <admin_access_key>
  *
  * Columnas del archivo:
- *   semana | exhibidor | dia | hora | usuario | acompanante | bloqueado | motivo_bloqueo
+ *   semana | exhibidor | dia | hora | publicador_a | publicador_b | bloqueado | motivo_bloqueo
  * ─────────────────────────────────────────────────────────────
  */
 import { NextRequest, NextResponse } from 'next/server'
@@ -291,8 +291,8 @@ export async function GET(req: NextRequest) {
       { wch: 28 }, // exhibidor
       { wch: 12 }, // dia
       { wch: 16 }, // hora
-      { wch: 28 }, // usuario
-      { wch: 28 }, // acompanante
+      { wch: 28 }, // publicador_a
+      { wch: 28 }, // publicador_b
       { wch: 12 }, // bloqueado
       { wch: 26 }, // motivo_bloqueo
     ]
@@ -392,8 +392,8 @@ export async function GET(req: NextRequest) {
       exhibidor: getExhibitorName(slot.exhibitor),
       dia: DAY_LABELS[slot.day_of_week] ?? String(slot.day_of_week),
       hora: `${shortTime(slot.start_time)} - ${shortTime(slot.end_time)}`,
-      usuario: slot.is_active ? occ.pos1 : 'No Disponible',
-      acompanante: slot.is_active ? occ.pos2 : 'No Disponible',
+      publicador_a: slot.is_active ? occ.pos1 : 'No Disponible',
+      publicador_b: slot.is_active ? occ.pos2 : 'No Disponible',
       bloqueado: blockedLabel,
       motivo_bloqueo: reasonLabel,
     }
@@ -406,8 +406,8 @@ export async function GET(req: NextRequest) {
     { wch: 28 }, // exhibidor
     { wch: 12 }, // dia
     { wch: 16 }, // hora
-    { wch: 28 }, // usuario
-    { wch: 28 }, // acompanante
+    { wch: 28 }, // publicador_a
+    { wch: 28 }, // publicador_b
     { wch: 12 }, // bloqueado
     { wch: 26 }, // motivo_bloqueo
   ]
@@ -590,7 +590,7 @@ export async function POST(req: NextRequest) {
     return found[0]
   }
 
-  const resolveUser = (name: string, rowNum: number, label: 'usuario' | 'acompanante'): UserLookupRow | null => {
+  const resolveUser = (name: string, rowNum: number, label: 'publicador_a' | 'publicador_b'): UserLookupRow | null => {
     const normalized = normalizeText(name)
     const found = usersByName.get(normalized) ?? []
     if (found.length === 0) {
@@ -611,13 +611,13 @@ export async function POST(req: NextRequest) {
     const exhibitorRaw = String(row.exhibidor ?? row.exhibitor ?? '').trim()
     const dayRaw = row.dia ?? row.day ?? ''
     const hourRaw = row.hora ?? row.hour ?? ''
-    let userRaw = parseAssigneeCell(row.usuario ?? row.user ?? '')
-    let companionRaw = parseAssigneeCell(row.acompanante ?? '')
+    let userRaw = parseAssigneeCell(row.publicador_a ?? row.usuario ?? row.user ?? '')
+    let companionRaw = parseAssigneeCell(row.publicador_b ?? row.acompanante ?? '')
     const blockedRaw = row.bloqueado ?? ''
     const estadoRaw = row.estado ?? ''
     const blockReasonRaw = String(row.motivo_bloqueo ?? '').trim()
 
-    // Si el principal quedó vacío pero hay acompañante, promovemos el acompañante
+    // Si Publicador A quedó vacío pero hay Publicador B, promovemos el valor
     // para evitar que el archivo sea rechazado por una edición parcial.
     if (!userRaw && companionRaw) {
       userRaw = companionRaw
@@ -706,7 +706,7 @@ export async function POST(req: NextRequest) {
     }
 
     if (!userRaw && companionRaw) {
-      addCellError(rowNum, 'usuario', 'no puedes definir acompañante sin usuario principal.')
+      addCellError(rowNum, 'publicador_a', 'no puedes definir Publicador B sin Publicador A.')
       continue
     }
 
@@ -714,20 +714,20 @@ export async function POST(req: NextRequest) {
       addCellError(
         rowNum,
         'bloqueado',
-        'el slot está marcado como bloqueado. Desbloquéalo para asignar usuario/acompañante.',
+        'el slot está marcado como bloqueado. Desbloquéalo para asignar Publicador A/Publicador B.',
       )
       continue
     }
 
-    const mainUser = resolveUser(userRaw, rowNum, 'usuario')
+    const mainUser = resolveUser(userRaw, rowNum, 'publicador_a')
     if (!mainUser) continue
 
     let companionUser: UserLookupRow | null = null
     if (companionRaw) {
-      companionUser = resolveUser(companionRaw, rowNum, 'acompanante')
+      companionUser = resolveUser(companionRaw, rowNum, 'publicador_b')
       if (!companionUser) continue
       if (companionUser.id === mainUser.id) {
-        addCellError(rowNum, 'acompanante', 'usuario y acompañante no pueden ser la misma persona.')
+        addCellError(rowNum, 'publicador_b', 'Publicador A y Publicador B no pueden ser la misma persona.')
         continue
       }
     }
