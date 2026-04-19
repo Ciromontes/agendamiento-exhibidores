@@ -97,20 +97,68 @@ export async function GET(req: NextRequest) {
 
   const activeWeek = cfg.active_week_start as string
 
-  const [{ data: slots, error: slotError }, { data: reservations, error: resError }] = await Promise.all([
-    supabase
-      .from('time_slots')
-      .select(`
-        id,
-        day_of_week,
-        start_time,
-        end_time,
-        is_active,
-        block_reason,
-        exhibitor:exhibitors!time_slots_exhibitor_id_fkey(id, name)
-      `)
-      .eq('congregation_id', admin.congregation_id),
-    supabase
+  // Usar SOLO exhibidores vigentes para evitar mezclar históricos/soft-deleted.
+  const { data: currentExhibitors, error: exhibError } = await supabase
+    .from('exhibitors')
+    .select('id')
+    .eq('congregation_id', admin.congregation_id)
+    .eq('is_active', true)
+    .is('deleted_at', null)
+
+  if (exhibError) {
+    return NextResponse.json({ error: exhibError.message }, { status: 500 })
+  }
+
+  const exhibitorIds = (currentExhibitors ?? []).map((e) => e.id)
+
+  if (exhibitorIds.length === 0) {
+    const ws = XLSX.utils.json_to_sheet([])
+    ws['!cols'] = [
+      { wch: 12 }, // semana
+      { wch: 28 }, // exhibidor
+      { wch: 12 }, // dia
+      { wch: 16 }, // hora
+      { wch: 28 }, // usuario
+      { wch: 28 }, // acompanante
+      { wch: 12 }, // estado
+      { wch: 26 }, // motivo_bloqueo
+    ]
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Reservas actuales')
+    const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' })
+
+    return new NextResponse(buf, {
+      status: 200,
+      headers: {
+        'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'Content-Disposition': `attachment; filename="reservas-actuales-${activeWeek}.xlsx"`,
+      },
+    })
+  }
+
+  const { data: slots, error: slotError } = await supabase
+    .from('time_slots')
+    .select(`
+      id,
+      day_of_week,
+      start_time,
+      end_time,
+      is_active,
+      block_reason,
+      exhibitor:exhibitors!time_slots_exhibitor_id_fkey(id, name)
+    `)
+    .eq('congregation_id', admin.congregation_id)
+    .in('exhibitor_id', exhibitorIds)
+
+  if (slotError) {
+    return NextResponse.json({ error: slotError.message }, { status: 500 })
+  }
+
+  const slotIds = (slots ?? []).map((s) => s.id)
+
+  let reservations: ReservationRow[] = []
+  if (slotIds.length > 0) {
+    const { data: reservationsData, error: resError } = await supabase
       .from('reservations')
       .select(`
         time_slot_id,
@@ -120,20 +168,19 @@ export async function GET(req: NextRequest) {
       `)
       .eq('congregation_id', admin.congregation_id)
       .eq('week_start', activeWeek)
-      .neq('status', 'cancelled'),
-  ])
+      .in('time_slot_id', slotIds)
+      .neq('status', 'cancelled')
 
-  if (slotError) {
-    return NextResponse.json({ error: slotError.message }, { status: 500 })
-  }
+    if (resError) {
+      return NextResponse.json({ error: resError.message }, { status: 500 })
+    }
 
-  if (resError) {
-    return NextResponse.json({ error: resError.message }, { status: 500 })
+    reservations = (reservationsData ?? []) as ReservationRow[]
   }
 
   const reservationMap = new Map<string, { pos1: string; pos2: string }>()
 
-  for (const r of (reservations ?? []) as ReservationRow[]) {
+  for (const r of reservations) {
     const current = reservationMap.get(r.time_slot_id) ?? { pos1: '', pos2: '' }
     const userName = getName(r.user)
 
