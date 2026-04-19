@@ -258,21 +258,34 @@ function formatWeekRange(weekStart: string, weekEnd: string): string {
   return `${start.toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' })} - ${end.toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' })}`
 }
 
-function getVisualReportWidth(layout: VisualReportLayout): number {
-  return layout === 'side_by_side' ? 1800 : 1460
+function getVisualReportWidth(layout: VisualReportLayout, fontSize = 14): number {
+  const normalized = Math.max(14, Math.min(24, fontSize))
+  const extra = normalized - 14
+
+  if (layout === 'side_by_side') {
+    return 1480 + extra * 36
+  }
+
+  return 1120 + extra * 28
 }
 
 function buildVisualReportHtml(report: VisualReportPayload, options: VisualReportOptions): string {
   const theme = VISUAL_THEMES[options.theme]
-  const rootWidth = getVisualReportWidth(options.layout)
-  const bodyFont = Math.max(12, Math.min(18, options.fontSize))
-  const titleFont = Math.max(30, Math.min(44, bodyFont + 20))
-  const subtitleFont = bodyFont + 2
-  const stampFont = Math.max(12, bodyFont - 1)
-  const tableHeaderFont = Math.max(11, bodyFont - 2)
-  const summaryLabelFont = Math.max(12, bodyFont - 1)
-  const summaryValueFont = bodyFont + 9
-  const exhibitorTitleFont = bodyFont + 6
+  const bodyFont = Math.max(14, Math.min(24, options.fontSize))
+  const rootWidth = getVisualReportWidth(options.layout, bodyFont)
+  const titleFont = Math.max(34, Math.min(56, bodyFont + 18))
+  const subtitleFont = Math.max(16, bodyFont + 2)
+  const stampFont = Math.max(13, bodyFont - 1)
+  const tableHeaderFont = Math.max(12, bodyFont - 3)
+  const summaryLabelFont = Math.max(12, bodyFont - 2)
+  const summaryValueFont = Math.max(24, bodyFont + 8)
+  const exhibitorTitleFont = Math.max(20, bodyFont + 5)
+  const rootPadding = 24 + Math.round((bodyFont - 14) * 0.9)
+  const headerPadY = 24 + Math.round((bodyFont - 14) * 0.8)
+  const headerPadX = 28 + Math.round((bodyFont - 14) * 0.7)
+  const sectionPadding = 18 + Math.round((bodyFont - 14) * 0.6)
+  const tableCellPadY = Math.max(6, Math.round(5 + (bodyFont - 14) * 0.35))
+  const tableCellPadX = Math.max(7, Math.round(6 + (bodyFont - 14) * 0.3))
   const groupsTemplate =
     options.layout === 'side_by_side' ? 'repeat(2, minmax(0, 1fr))' : 'minmax(0, 1fr)'
   const layoutLabel = options.layout === 'side_by_side' ? 'Tablas lado a lado' : 'Tablas en linea'
@@ -335,7 +348,7 @@ function buildVisualReportHtml(report: VisualReportPayload, options: VisualRepor
           font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
           background: ${theme.rootBackground};
           color: ${theme.textColor};
-          padding: 36px;
+          padding: ${rootPadding}px;
           box-sizing: border-box;
           font-size: ${bodyFont}px;
         }
@@ -349,13 +362,13 @@ function buildVisualReportHtml(report: VisualReportPayload, options: VisualRepor
         }
 
         .header {
-          padding: 28px 32px;
+          padding: ${headerPadY}px ${headerPadX}px;
           background: ${theme.headerBackground};
           color: #f8fafc;
           display: flex;
           justify-content: space-between;
           align-items: flex-start;
-          gap: 20px;
+          gap: 14px;
         }
 
         .title {
@@ -378,14 +391,14 @@ function buildVisualReportHtml(report: VisualReportPayload, options: VisualRepor
           font-size: ${stampFont}px;
           opacity: 0.9;
           line-height: 1.35;
-          min-width: 260px;
+          min-width: 220px;
         }
 
         .summary {
           display: grid;
           grid-template-columns: repeat(3, minmax(0, 1fr));
-          gap: 14px;
-          padding: 18px 22px 0;
+          gap: 10px;
+          padding: ${Math.max(14, sectionPadding - 2)}px ${sectionPadding}px 0;
         }
 
         .summary-box {
@@ -412,10 +425,10 @@ function buildVisualReportHtml(report: VisualReportPayload, options: VisualRepor
         }
 
         .groups {
-          padding: 22px;
+          padding: ${sectionPadding}px;
           display: grid;
           grid-template-columns: ${groupsTemplate};
-          gap: 18px;
+          gap: 12px;
           align-items: start;
         }
 
@@ -447,35 +460,35 @@ function buildVisualReportHtml(report: VisualReportPayload, options: VisualRepor
           font-weight: 700;
           font-size: ${tableHeaderFont}px;
           text-transform: uppercase;
-          letter-spacing: 0.3px;
+          letter-spacing: 0.2px;
           border-bottom: 1px solid #e2e8f0;
-          padding: 9px 10px;
+          padding: ${tableCellPadY}px ${tableCellPadX}px;
           text-align: left;
         }
 
         .cell {
           font-size: ${bodyFont}px;
-          padding: 10px;
+          padding: ${tableCellPadY}px ${tableCellPadX}px;
           border-bottom: 1px solid #edf2f7;
           vertical-align: top;
-          line-height: 1.35;
+          line-height: 1.3;
         }
 
         .day {
-          width: 18%;
+          width: 15%;
           color: ${theme.textColor};
           font-weight: 700;
         }
 
         .time {
-          width: 20%;
+          width: 17%;
           color: ${theme.accentColor};
           font-weight: 700;
         }
 
         .user,
         .companion {
-          width: 31%;
+          width: 34%;
           color: ${theme.textColor};
         }
 
@@ -527,9 +540,9 @@ export default function AdminExcelPanel() {
   const [downloading, setDownloading] = useState(false)
   const [downloadingReservations, setDownloadingReservations] = useState(false)
   const [downloadingVisual, setDownloadingVisual] = useState<'png' | 'pdf' | null>(null)
-  const [visualFontSize, setVisualFontSize] = useState(13)
+  const [visualFontSize, setVisualFontSize] = useState(16)
   const [visualTheme, setVisualTheme] = useState<VisualReportThemeKey>('soft_ocean')
-  const [visualLayout, setVisualLayout] = useState<VisualReportLayout>('side_by_side')
+  const [visualLayout, setVisualLayout] = useState<VisualReportLayout>('inline')
   const [uploading, setUploading] = useState(false)
   const [uploadingReservations, setUploadingReservations] = useState(false)
   const [result, setResult] = useState<ImportResult>(null)
@@ -643,7 +656,7 @@ export default function AdminExcelPanel() {
       }
 
       const themeForExport = VISUAL_THEMES[visualTheme]
-      const reportWidth = getVisualReportWidth(visualLayout)
+      const reportWidth = getVisualReportWidth(visualLayout, visualFontSize)
       const reportOptions: VisualReportOptions = {
         fontSize: visualFontSize,
         theme: visualTheme,
@@ -907,15 +920,15 @@ export default function AdminExcelPanel() {
               </div>
               <input
                 type="range"
-                min={12}
-                max={18}
+                min={14}
+                max={24}
                 step={1}
                 value={visualFontSize}
                 onChange={(e) => setVisualFontSize(Number(e.target.value))}
                 className="w-full accent-blue-600"
               />
               <p className="text-[11px] text-gray-500 mt-1">
-                Rango permitido: 12 a 18.
+                Rango permitido: 14 a 24.
               </p>
             </div>
 
