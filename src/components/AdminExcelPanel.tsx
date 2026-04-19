@@ -28,11 +28,299 @@ type ImportResult = {
   message?: string
 } | null
 
+type VisualReportRow = {
+  day_of_week: number
+  day_label: string
+  start_time: string
+  end_time: string
+  user_name: string
+  companion_name: string
+}
+
+type VisualReportGroup = {
+  exhibitorName: string
+  rows: VisualReportRow[]
+}
+
+type VisualReportPayload = {
+  ok: boolean
+  weekStart: string
+  weekEnd: string
+  congregationName: string
+  generatedAt: string
+  totalSlots: number
+  totalAssignments: number
+  groups: VisualReportGroup[]
+}
+
+function escapeHtml(value: string): string {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;')
+}
+
+function shortTime(time: string): string {
+  return (time ?? '').slice(0, 5)
+}
+
+function formatWeekRange(weekStart: string, weekEnd: string): string {
+  const start = new Date(weekStart + 'T12:00:00')
+  const end = new Date(weekEnd + 'T12:00:00')
+  return `${start.toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' })} - ${end.toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' })}`
+}
+
+function buildVisualReportHtml(report: VisualReportPayload): string {
+  const generatedLabel = new Date(report.generatedAt).toLocaleString('es-CO', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
+
+  const weekRange = formatWeekRange(report.weekStart, report.weekEnd)
+
+  const groupsHtml = report.groups
+    .map((group) => {
+      const rowsHtml = group.rows
+        .map((row) => {
+          const companion = row.companion_name
+            ? `<span>${escapeHtml(row.companion_name)}</span>`
+            : '<span class="muted">Sin acompanante</span>'
+
+          return `
+            <tr>
+              <td class="cell day">${escapeHtml(row.day_label)}</td>
+              <td class="cell time">${escapeHtml(shortTime(row.start_time))} - ${escapeHtml(shortTime(row.end_time))}</td>
+              <td class="cell user">${escapeHtml(row.user_name)}</td>
+              <td class="cell companion">${companion}</td>
+            </tr>
+          `
+        })
+        .join('')
+
+      return `
+        <section class="exhibitor-card">
+          <div class="exhibitor-title">${escapeHtml(group.exhibitorName)}</div>
+          <table class="reservations-table" aria-label="Reservas de ${escapeHtml(group.exhibitorName)}">
+            <thead>
+              <tr>
+                <th>Dia</th>
+                <th>Horario</th>
+                <th>Usuario principal</th>
+                <th>Acompanante</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rowsHtml}
+            </tbody>
+          </table>
+        </section>
+      `
+    })
+    .join('')
+
+  return `
+    <div class="report-root">
+      <style>
+        .report-root {
+          width: 1800px;
+          font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+          background: linear-gradient(180deg, #edf2f7 0%, #f8fafc 100%);
+          color: #1f2937;
+          padding: 36px;
+          box-sizing: border-box;
+        }
+
+        .report-card {
+          background: #ffffff;
+          border: 1px solid #dbe3ef;
+          border-radius: 22px;
+          overflow: hidden;
+          box-shadow: 0 20px 45px rgba(15, 23, 42, 0.12);
+        }
+
+        .header {
+          padding: 28px 32px;
+          background: linear-gradient(135deg, #1d4ed8, #0f172a);
+          color: #f8fafc;
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          gap: 20px;
+        }
+
+        .title {
+          margin: 0;
+          font-size: 34px;
+          line-height: 1.15;
+          letter-spacing: 0.2px;
+          font-weight: 800;
+        }
+
+        .subtitle {
+          margin: 8px 0 0;
+          font-size: 16px;
+          opacity: 0.92;
+          line-height: 1.4;
+        }
+
+        .stamp {
+          text-align: right;
+          font-size: 13px;
+          opacity: 0.9;
+          line-height: 1.35;
+          min-width: 260px;
+        }
+
+        .summary {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 14px;
+          padding: 18px 22px 0;
+        }
+
+        .summary-box {
+          border: 1px solid #dce7fb;
+          border-radius: 14px;
+          background: #f8fbff;
+          padding: 14px;
+        }
+
+        .summary-label {
+          color: #64748b;
+          font-size: 13px;
+          margin-bottom: 6px;
+          letter-spacing: 0.2px;
+          text-transform: uppercase;
+          font-weight: 700;
+        }
+
+        .summary-value {
+          font-size: 22px;
+          font-weight: 800;
+          color: #0f172a;
+          line-height: 1.2;
+        }
+
+        .groups {
+          padding: 22px;
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 18px;
+          align-items: start;
+        }
+
+        .exhibitor-card {
+          border: 1px solid #d6e0ee;
+          border-radius: 16px;
+          overflow: hidden;
+          background: #ffffff;
+        }
+
+        .exhibitor-title {
+          background: #eff6ff;
+          border-bottom: 1px solid #d9e5fb;
+          color: #0f172a;
+          font-size: 19px;
+          font-weight: 800;
+          padding: 12px 14px;
+        }
+
+        .reservations-table {
+          width: 100%;
+          border-collapse: collapse;
+          table-layout: fixed;
+        }
+
+        .reservations-table th {
+          background: #f8fafc;
+          color: #475569;
+          font-weight: 700;
+          font-size: 12px;
+          text-transform: uppercase;
+          letter-spacing: 0.3px;
+          border-bottom: 1px solid #e2e8f0;
+          padding: 9px 10px;
+          text-align: left;
+        }
+
+        .cell {
+          font-size: 13px;
+          padding: 10px;
+          border-bottom: 1px solid #edf2f7;
+          vertical-align: top;
+          line-height: 1.35;
+        }
+
+        .day {
+          width: 18%;
+          color: #334155;
+          font-weight: 700;
+        }
+
+        .time {
+          width: 20%;
+          color: #0f172a;
+          font-weight: 700;
+        }
+
+        .user,
+        .companion {
+          width: 31%;
+          color: #1e293b;
+        }
+
+        .muted {
+          color: #94a3b8;
+          font-style: italic;
+        }
+      </style>
+
+      <div class="report-card">
+        <header class="header">
+          <div>
+            <h1 class="title">Resumen Visual de Reservas Confirmadas</h1>
+            <p class="subtitle">${escapeHtml(report.congregationName)} | Semana: ${escapeHtml(weekRange)}</p>
+          </div>
+          <div class="stamp">
+            <div><strong>Generado:</strong> ${escapeHtml(generatedLabel)}</div>
+            <div><strong>Semana base:</strong> ${escapeHtml(report.weekStart)}</div>
+          </div>
+        </header>
+
+        <section class="summary">
+          <div class="summary-box">
+            <div class="summary-label">Exhibidores con reservas</div>
+            <div class="summary-value">${report.groups.length}</div>
+          </div>
+          <div class="summary-box">
+            <div class="summary-label">Turnos confirmados</div>
+            <div class="summary-value">${report.totalSlots}</div>
+          </div>
+          <div class="summary-box">
+            <div class="summary-label">Personas asignadas</div>
+            <div class="summary-value">${report.totalAssignments}</div>
+          </div>
+        </section>
+
+        <section class="groups">
+          ${groupsHtml}
+        </section>
+      </div>
+    </div>
+  `
+}
+
 export default function AdminExcelPanel() {
   const { user } = useUser()
 
   const [downloading, setDownloading] = useState(false)
   const [downloadingReservations, setDownloadingReservations] = useState(false)
+  const [downloadingVisual, setDownloadingVisual] = useState<'png' | 'pdf' | null>(null)
   const [uploading, setUploading] = useState(false)
   const [uploadingReservations, setUploadingReservations] = useState(false)
   const [result, setResult] = useState<ImportResult>(null)
@@ -113,6 +401,99 @@ export default function AdminExcelPanel() {
       setError('Error de conexión al descargar reservas actuales.')
     } finally {
       setDownloadingReservations(false)
+    }
+  }
+
+  // =============================================================
+  // Descargar reporte visual (PNG/PDF)
+  // =============================================================
+  const handleDownloadVisual = async (format: 'png' | 'pdf') => {
+    setDownloadingVisual(format)
+    setError('')
+    setResult(null)
+
+    let mountNode: HTMLDivElement | null = null
+
+    try {
+      const res = await fetch(`/api/admin/reservations/visual-report?t=${Date.now()}`, {
+        cache: 'no-store',
+        headers: { 'x-access-key': accessKey },
+      })
+
+      const json = await res.json().catch(() => ({}))
+
+      if (!res.ok) {
+        setError((json as { error?: string }).error ?? `Error ${res.status}`)
+        return
+      }
+
+      const report = json as VisualReportPayload
+      if (!report.groups || report.groups.length === 0 || report.totalSlots === 0) {
+        setError('No hay reservas confirmadas para la semana activa.')
+        return
+      }
+
+      const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
+        import('html2canvas'),
+        import('jspdf'),
+      ])
+
+      mountNode = document.createElement('div')
+      mountNode.style.position = 'fixed'
+      mountNode.style.left = '-10000px'
+      mountNode.style.top = '0'
+      mountNode.style.width = '1800px'
+      mountNode.style.pointerEvents = 'none'
+      mountNode.innerHTML = buildVisualReportHtml(report)
+      document.body.appendChild(mountNode)
+
+      const reportElement = (mountNode.firstElementChild as HTMLElement | null) ?? mountNode
+      const fontSet = (document as Document & { fonts?: { ready: Promise<unknown> } }).fonts
+      if (fontSet?.ready) {
+        await fontSet.ready
+      }
+
+      const canvas = await html2canvas(reportElement, {
+        scale: 3,
+        useCORS: true,
+        backgroundColor: '#edf2f7',
+        logging: false,
+        windowWidth: reportElement.scrollWidth,
+        windowHeight: reportElement.scrollHeight,
+      })
+
+      const pngData = canvas.toDataURL('image/png', 1.0)
+      const baseName = `reservas-confirmadas-${report.weekStart}`
+
+      if (format === 'png') {
+        const a = document.createElement('a')
+        a.href = pngData
+        a.download = `${baseName}.png`
+        document.body.appendChild(a)
+        a.click()
+        a.remove()
+      } else {
+        const pxToPt = 72 / 96
+        const pdfWidth = canvas.width * pxToPt
+        const pdfHeight = canvas.height * pxToPt
+
+        const pdf = new jsPDF({
+          orientation: pdfWidth >= pdfHeight ? 'landscape' : 'portrait',
+          unit: 'pt',
+          format: [pdfWidth, pdfHeight],
+          compress: true,
+        })
+
+        pdf.addImage(pngData, 'PNG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST')
+        pdf.save(`${baseName}.pdf`)
+      }
+    } catch {
+      setError('No se pudo generar el reporte visual. Intenta de nuevo.')
+    } finally {
+      if (mountNode && mountNode.parentNode) {
+        mountNode.parentNode.removeChild(mountNode)
+      }
+      setDownloadingVisual(null)
     }
   }
 
@@ -207,7 +588,7 @@ export default function AdminExcelPanel() {
       </div>
 
       {/* ─── Acciones principales ──────────────────────────── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
         {/* Descargar usuarios */}
         <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
           <h3 className="font-semibold text-gray-700 mb-2">⬇️ Descargar usuarios</h3>
@@ -292,6 +673,34 @@ export default function AdminExcelPanel() {
               className="hidden"
             />
           </label>
+        </div>
+
+        {/* Descargar reporte visual profesional */}
+        <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
+          <h3 className="font-semibold text-gray-700 mb-2">🖼️ Reporte visual (Admin)</h3>
+          <p className="text-sm text-gray-500 mb-4">
+            Descarga un resumen limpio de reservas confirmadas en alta definición, sin horarios vacíos.
+          </p>
+          <div className="space-y-2">
+            <button
+              onClick={() => handleDownloadVisual('png')}
+              disabled={downloadingVisual !== null}
+              className="w-full px-4 py-2.5 bg-slate-700 text-white rounded-lg font-medium
+                         hover:bg-slate-800 disabled:opacity-50 disabled:cursor-wait
+                         transition-colors"
+            >
+              {downloadingVisual === 'png' ? 'Generando PNG...' : 'Descargar PNG HD'}
+            </button>
+            <button
+              onClick={() => handleDownloadVisual('pdf')}
+              disabled={downloadingVisual !== null}
+              className="w-full px-4 py-2.5 bg-rose-600 text-white rounded-lg font-medium
+                         hover:bg-rose-700 disabled:opacity-50 disabled:cursor-wait
+                         transition-colors"
+            >
+              {downloadingVisual === 'pdf' ? 'Generando PDF...' : 'Descargar PDF HD'}
+            </button>
+          </div>
         </div>
       </div>
 
