@@ -34,9 +34,12 @@ export default function AdminExcelPanel() {
   const [downloading, setDownloading] = useState(false)
   const [downloadingReservations, setDownloadingReservations] = useState(false)
   const [uploading, setUploading] = useState(false)
+  const [uploadingReservations, setUploadingReservations] = useState(false)
   const [result, setResult] = useState<ImportResult>(null)
+  const [resultTitle, setResultTitle] = useState('📋 Resultado de la importación')
   const [error, setError] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const reservationsFileInputRef = useRef<HTMLInputElement>(null)
 
   const accessKey = user?.access_key ?? ''
 
@@ -138,6 +141,7 @@ export default function AdminExcelPanel() {
       if (!res.ok && res.status !== 422) {
         setError(json.error ?? `Error ${res.status}`)
       } else {
+        setResultTitle('📋 Resultado de la importación de usuarios')
         setResult(json as ImportResult)
       }
     } catch {
@@ -146,6 +150,43 @@ export default function AdminExcelPanel() {
       setUploading(false)
       // Limpiar el input para permitir re-subir el mismo archivo
       if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  // =============================================================
+  // Subir Excel de reservas (se aplica a la semana siguiente)
+  // =============================================================
+  const handleUploadReservations = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setUploadingReservations(true)
+    setError('')
+    setResult(null)
+
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+
+      const res = await fetch('/api/admin/reservations/excel', {
+        method: 'POST',
+        headers: { 'x-access-key': accessKey },
+        body: formData,
+      })
+
+      const json = await res.json()
+
+      if (!res.ok && res.status !== 422) {
+        setError(json.error ?? `Error ${res.status}`)
+      } else {
+        setResultTitle('📋 Resultado de la importación de reservas (semana siguiente)')
+        setResult(json as ImportResult)
+      }
+    } catch {
+      setError('Error de conexión al subir reservas.')
+    } finally {
+      setUploadingReservations(false)
+      if (reservationsFileInputRef.current) reservationsFileInputRef.current.value = ''
     }
   }
 
@@ -160,12 +201,12 @@ export default function AdminExcelPanel() {
           📊 Importar / Exportar (Excel)
         </h2>
         <p className="text-sm text-gray-500 mt-1">
-          Descarga usuarios o reservas actuales, y sube archivo Excel para crear/actualizar usuarios en lote.
+          Descarga usuarios o reservas actuales, y sube Excel para usuarios o para reservar automáticamente la semana siguiente.
         </p>
       </div>
 
       {/* ─── Acciones principales ──────────────────────────── */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         {/* Descargar usuarios */}
         <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
           <h3 className="font-semibold text-gray-700 mb-2">⬇️ Descargar usuarios</h3>
@@ -181,6 +222,32 @@ export default function AdminExcelPanel() {
           >
             {downloading ? 'Descargando...' : 'Descargar usuarios.xlsx'}
           </button>
+        </div>
+
+        {/* Subir reservas (semana siguiente) */}
+        <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
+          <h3 className="font-semibold text-gray-700 mb-2">⬆️ Subir reservas (semana siguiente)</h3>
+          <p className="text-sm text-gray-500 mb-4">
+            Sube el Excel modificado para aplicar usuarios/acompañantes a la próxima semana.
+          </p>
+          <label
+            className={`block w-full text-center px-4 py-2.5 rounded-lg font-medium
+                        transition-colors cursor-pointer
+                        ${uploadingReservations
+                          ? 'bg-gray-300 text-gray-500 cursor-wait'
+                          : 'bg-cyan-600 text-white hover:bg-cyan-700'
+                        }`}
+          >
+            {uploadingReservations ? 'Procesando...' : 'Subir reservas .xlsx'}
+            <input
+              ref={reservationsFileInputRef}
+              type="file"
+              accept=".xlsx,.xls"
+              onChange={handleUploadReservations}
+              disabled={uploadingReservations}
+              className="hidden"
+            />
+          </label>
         </div>
 
         {/* Descargar reservas actuales */}
@@ -237,7 +304,7 @@ export default function AdminExcelPanel() {
       {/* ─── Resultado de importación ─────────────────────── */}
       {result && (
         <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm space-y-3">
-          <h3 className="font-semibold text-gray-700">📋 Resultado de la importación</h3>
+          <h3 className="font-semibold text-gray-700">{resultTitle}</h3>
 
           {/* Banner de rechazo total */}
           {result.rejected && (
@@ -356,6 +423,17 @@ export default function AdminExcelPanel() {
               <li>No te preocupes por el <strong>id</strong> ni la <strong>clave_acceso</strong> — se generan automáticamente.</li>
               <li>Sube el archivo y revisa el resultado.</li>
               <li>Después puedes descargar el Excel para ver las claves generadas y compartirlas.</li>
+            </ol>
+          </div>
+
+          <div className="border-t border-gray-200 pt-4">
+            <h4 className="font-medium text-gray-700 mb-1">Flujo recomendado (reservas de semana siguiente):</h4>
+            <ol className="list-decimal list-inside space-y-1">
+              <li>Descarga <strong>reservas actuales</strong>.</li>
+              <li>Edita solo: <strong>usuario</strong> y <strong>acompanante</strong> por fila (exhibidor/día/hora deben conservarse).</li>
+              <li>Deja usuario y acompañante vacíos para un turno libre.</li>
+              <li>Sube el archivo con <strong>Subir reservas (semana siguiente)</strong>.</li>
+              <li>El sistema validará nombres/horarios y aplicará el resultado a la próxima semana.</li>
             </ol>
           </div>
 
