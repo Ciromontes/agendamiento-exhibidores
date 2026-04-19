@@ -53,6 +53,192 @@ type VisualReportPayload = {
   groups: VisualReportGroup[]
 }
 
+type VisualReportThemeKey =
+  | 'soft_ocean'
+  | 'soft_sage'
+  | 'soft_sand'
+  | 'soft_lavender'
+  | 'vivid_cobalt'
+  | 'vivid_emerald'
+  | 'vivid_crimson'
+  | 'vivid_sunset'
+
+type VisualReportLayout = 'side_by_side' | 'inline'
+
+type VisualTheme = {
+  label: string
+  group: 'suave' | 'llamativo'
+  canvasColor: string
+  rootBackground: string
+  headerBackground: string
+  cardBackground: string
+  cardBorder: string
+  summaryBackground: string
+  summaryBorder: string
+  exhibitorBackground: string
+  exhibitorBorder: string
+  tableHeadBackground: string
+  textColor: string
+  mutedColor: string
+  accentColor: string
+}
+
+type VisualReportOptions = {
+  fontSize: number
+  theme: VisualReportThemeKey
+  layout: VisualReportLayout
+}
+
+const VISUAL_THEME_ORDER: VisualReportThemeKey[] = [
+  'soft_ocean',
+  'soft_sage',
+  'soft_sand',
+  'soft_lavender',
+  'vivid_cobalt',
+  'vivid_emerald',
+  'vivid_crimson',
+  'vivid_sunset',
+]
+
+const VISUAL_THEMES: Record<VisualReportThemeKey, VisualTheme> = {
+  soft_ocean: {
+    label: 'Ocean Calm',
+    group: 'suave',
+    canvasColor: '#ecf4fb',
+    rootBackground: 'linear-gradient(180deg, #ecf4fb 0%, #f8fbff 100%)',
+    headerBackground: 'linear-gradient(135deg, #1f4a73, #0f2f4b)',
+    cardBackground: '#ffffff',
+    cardBorder: '#d8e4f0',
+    summaryBackground: '#f5faff',
+    summaryBorder: '#d7e8f8',
+    exhibitorBackground: '#eef6ff',
+    exhibitorBorder: '#d6e7f8',
+    tableHeadBackground: '#f8fbff',
+    textColor: '#1f2a37',
+    mutedColor: '#6b7a90',
+    accentColor: '#3b82f6',
+  },
+  soft_sage: {
+    label: 'Sage Mist',
+    group: 'suave',
+    canvasColor: '#edf5f0',
+    rootBackground: 'linear-gradient(180deg, #edf5f0 0%, #f9fcfa 100%)',
+    headerBackground: 'linear-gradient(135deg, #315b4a, #1f3e33)',
+    cardBackground: '#ffffff',
+    cardBorder: '#dbe8e1',
+    summaryBackground: '#f6fbf8',
+    summaryBorder: '#d8ece2',
+    exhibitorBackground: '#effaf4',
+    exhibitorBorder: '#d7eddc',
+    tableHeadBackground: '#f8fcf9',
+    textColor: '#1f2d2a',
+    mutedColor: '#6c7f79',
+    accentColor: '#10b981',
+  },
+  soft_sand: {
+    label: 'Sand Linen',
+    group: 'suave',
+    canvasColor: '#f6f2ea',
+    rootBackground: 'linear-gradient(180deg, #f6f2ea 0%, #fefcf8 100%)',
+    headerBackground: 'linear-gradient(135deg, #6a4b2f, #3f2b1b)',
+    cardBackground: '#ffffff',
+    cardBorder: '#e9dfd1',
+    summaryBackground: '#fdf8f1',
+    summaryBorder: '#f0e3d1',
+    exhibitorBackground: '#fff7ed',
+    exhibitorBorder: '#f3e2cc',
+    tableHeadBackground: '#fffbf6',
+    textColor: '#2f261d',
+    mutedColor: '#7d6f60',
+    accentColor: '#c98a3c',
+  },
+  soft_lavender: {
+    label: 'Lavender Fog',
+    group: 'suave',
+    canvasColor: '#f3f1fb',
+    rootBackground: 'linear-gradient(180deg, #f3f1fb 0%, #fbfaff 100%)',
+    headerBackground: 'linear-gradient(135deg, #4d4f87, #2f3159)',
+    cardBackground: '#ffffff',
+    cardBorder: '#e0e1f2',
+    summaryBackground: '#f8f8ff',
+    summaryBorder: '#e2e3f6',
+    exhibitorBackground: '#f3f4ff',
+    exhibitorBorder: '#dde0f8',
+    tableHeadBackground: '#fafaff',
+    textColor: '#23263f',
+    mutedColor: '#72759a',
+    accentColor: '#6366f1',
+  },
+  vivid_cobalt: {
+    label: 'Cobalt Edge',
+    group: 'llamativo',
+    canvasColor: '#eaf1ff',
+    rootBackground: 'linear-gradient(180deg, #eaf1ff 0%, #f7faff 100%)',
+    headerBackground: 'linear-gradient(135deg, #1d4ed8, #1e3a8a)',
+    cardBackground: '#ffffff',
+    cardBorder: '#c9dafb',
+    summaryBackground: '#eff5ff',
+    summaryBorder: '#cddffb',
+    exhibitorBackground: '#e9f1ff',
+    exhibitorBorder: '#cfdff8',
+    tableHeadBackground: '#f5f9ff',
+    textColor: '#12243f',
+    mutedColor: '#5f7496',
+    accentColor: '#2563eb',
+  },
+  vivid_emerald: {
+    label: 'Emerald Pulse',
+    group: 'llamativo',
+    canvasColor: '#e9faf4',
+    rootBackground: 'linear-gradient(180deg, #e9faf4 0%, #f5fffb 100%)',
+    headerBackground: 'linear-gradient(135deg, #047857, #065f46)',
+    cardBackground: '#ffffff',
+    cardBorder: '#ccefe3',
+    summaryBackground: '#edfff8',
+    summaryBorder: '#cfeede',
+    exhibitorBackground: '#e6fff4',
+    exhibitorBorder: '#ccecd9',
+    tableHeadBackground: '#f5fffb',
+    textColor: '#102c23',
+    mutedColor: '#587a70',
+    accentColor: '#059669',
+  },
+  vivid_crimson: {
+    label: 'Crimson Classic',
+    group: 'llamativo',
+    canvasColor: '#fff0f1',
+    rootBackground: 'linear-gradient(180deg, #fff0f1 0%, #fff9fa 100%)',
+    headerBackground: 'linear-gradient(135deg, #be123c, #7f1d1d)',
+    cardBackground: '#ffffff',
+    cardBorder: '#f3d2db',
+    summaryBackground: '#fff5f7',
+    summaryBorder: '#f4d5de',
+    exhibitorBackground: '#fff0f4',
+    exhibitorBorder: '#f3d4de',
+    tableHeadBackground: '#fff8fa',
+    textColor: '#3b111d',
+    mutedColor: '#8f5d6a',
+    accentColor: '#e11d48',
+  },
+  vivid_sunset: {
+    label: 'Sunset Gold',
+    group: 'llamativo',
+    canvasColor: '#fff7e8',
+    rootBackground: 'linear-gradient(180deg, #fff7e8 0%, #fffcf4 100%)',
+    headerBackground: 'linear-gradient(135deg, #d97706, #9a3412)',
+    cardBackground: '#ffffff',
+    cardBorder: '#f2e1c3',
+    summaryBackground: '#fffaf0',
+    summaryBorder: '#f4e5c9',
+    exhibitorBackground: '#fff7e6',
+    exhibitorBorder: '#f4e2bf',
+    tableHeadBackground: '#fffdf8',
+    textColor: '#3b2a0f',
+    mutedColor: '#8f7855',
+    accentColor: '#ea580c',
+  },
+}
+
 function escapeHtml(value: string): string {
   return String(value)
     .replace(/&/g, '&amp;')
@@ -72,7 +258,25 @@ function formatWeekRange(weekStart: string, weekEnd: string): string {
   return `${start.toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' })} - ${end.toLocaleDateString('es-CO', { day: 'numeric', month: 'long', year: 'numeric' })}`
 }
 
-function buildVisualReportHtml(report: VisualReportPayload): string {
+function getVisualReportWidth(layout: VisualReportLayout): number {
+  return layout === 'side_by_side' ? 1800 : 1460
+}
+
+function buildVisualReportHtml(report: VisualReportPayload, options: VisualReportOptions): string {
+  const theme = VISUAL_THEMES[options.theme]
+  const rootWidth = getVisualReportWidth(options.layout)
+  const bodyFont = Math.max(12, Math.min(18, options.fontSize))
+  const titleFont = Math.max(30, Math.min(44, bodyFont + 20))
+  const subtitleFont = bodyFont + 2
+  const stampFont = Math.max(12, bodyFont - 1)
+  const tableHeaderFont = Math.max(11, bodyFont - 2)
+  const summaryLabelFont = Math.max(12, bodyFont - 1)
+  const summaryValueFont = bodyFont + 9
+  const exhibitorTitleFont = bodyFont + 6
+  const groupsTemplate =
+    options.layout === 'side_by_side' ? 'repeat(2, minmax(0, 1fr))' : 'minmax(0, 1fr)'
+  const layoutLabel = options.layout === 'side_by_side' ? 'Tablas lado a lado' : 'Tablas en linea'
+
   const generatedLabel = new Date(report.generatedAt).toLocaleString('es-CO', {
     day: '2-digit',
     month: '2-digit',
@@ -127,17 +331,18 @@ function buildVisualReportHtml(report: VisualReportPayload): string {
     <div class="report-root">
       <style>
         .report-root {
-          width: 1800px;
+          width: ${rootWidth}px;
           font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
-          background: linear-gradient(180deg, #edf2f7 0%, #f8fafc 100%);
-          color: #1f2937;
+          background: ${theme.rootBackground};
+          color: ${theme.textColor};
           padding: 36px;
           box-sizing: border-box;
+          font-size: ${bodyFont}px;
         }
 
         .report-card {
-          background: #ffffff;
-          border: 1px solid #dbe3ef;
+          background: ${theme.cardBackground};
+          border: 1px solid ${theme.cardBorder};
           border-radius: 22px;
           overflow: hidden;
           box-shadow: 0 20px 45px rgba(15, 23, 42, 0.12);
@@ -145,7 +350,7 @@ function buildVisualReportHtml(report: VisualReportPayload): string {
 
         .header {
           padding: 28px 32px;
-          background: linear-gradient(135deg, #1d4ed8, #0f172a);
+          background: ${theme.headerBackground};
           color: #f8fafc;
           display: flex;
           justify-content: space-between;
@@ -155,7 +360,7 @@ function buildVisualReportHtml(report: VisualReportPayload): string {
 
         .title {
           margin: 0;
-          font-size: 34px;
+          font-size: ${titleFont}px;
           line-height: 1.15;
           letter-spacing: 0.2px;
           font-weight: 800;
@@ -163,14 +368,14 @@ function buildVisualReportHtml(report: VisualReportPayload): string {
 
         .subtitle {
           margin: 8px 0 0;
-          font-size: 16px;
+          font-size: ${subtitleFont}px;
           opacity: 0.92;
           line-height: 1.4;
         }
 
         .stamp {
           text-align: right;
-          font-size: 13px;
+          font-size: ${stampFont}px;
           opacity: 0.9;
           line-height: 1.35;
           min-width: 260px;
@@ -184,15 +389,15 @@ function buildVisualReportHtml(report: VisualReportPayload): string {
         }
 
         .summary-box {
-          border: 1px solid #dce7fb;
+          border: 1px solid ${theme.summaryBorder};
           border-radius: 14px;
-          background: #f8fbff;
+          background: ${theme.summaryBackground};
           padding: 14px;
         }
 
         .summary-label {
-          color: #64748b;
-          font-size: 13px;
+          color: ${theme.mutedColor};
+          font-size: ${summaryLabelFont}px;
           margin-bottom: 6px;
           letter-spacing: 0.2px;
           text-transform: uppercase;
@@ -200,32 +405,32 @@ function buildVisualReportHtml(report: VisualReportPayload): string {
         }
 
         .summary-value {
-          font-size: 22px;
+          font-size: ${summaryValueFont}px;
           font-weight: 800;
-          color: #0f172a;
+          color: ${theme.textColor};
           line-height: 1.2;
         }
 
         .groups {
           padding: 22px;
           display: grid;
-          grid-template-columns: repeat(2, minmax(0, 1fr));
+          grid-template-columns: ${groupsTemplate};
           gap: 18px;
           align-items: start;
         }
 
         .exhibitor-card {
-          border: 1px solid #d6e0ee;
+          border: 1px solid ${theme.exhibitorBorder};
           border-radius: 16px;
           overflow: hidden;
-          background: #ffffff;
+          background: ${theme.cardBackground};
         }
 
         .exhibitor-title {
-          background: #eff6ff;
-          border-bottom: 1px solid #d9e5fb;
-          color: #0f172a;
-          font-size: 19px;
+          background: ${theme.exhibitorBackground};
+          border-bottom: 1px solid ${theme.exhibitorBorder};
+          color: ${theme.textColor};
+          font-size: ${exhibitorTitleFont}px;
           font-weight: 800;
           padding: 12px 14px;
         }
@@ -237,10 +442,10 @@ function buildVisualReportHtml(report: VisualReportPayload): string {
         }
 
         .reservations-table th {
-          background: #f8fafc;
-          color: #475569;
+          background: ${theme.tableHeadBackground};
+          color: ${theme.mutedColor};
           font-weight: 700;
-          font-size: 12px;
+          font-size: ${tableHeaderFont}px;
           text-transform: uppercase;
           letter-spacing: 0.3px;
           border-bottom: 1px solid #e2e8f0;
@@ -249,7 +454,7 @@ function buildVisualReportHtml(report: VisualReportPayload): string {
         }
 
         .cell {
-          font-size: 13px;
+          font-size: ${bodyFont}px;
           padding: 10px;
           border-bottom: 1px solid #edf2f7;
           vertical-align: top;
@@ -258,24 +463,24 @@ function buildVisualReportHtml(report: VisualReportPayload): string {
 
         .day {
           width: 18%;
-          color: #334155;
+          color: ${theme.textColor};
           font-weight: 700;
         }
 
         .time {
           width: 20%;
-          color: #0f172a;
+          color: ${theme.accentColor};
           font-weight: 700;
         }
 
         .user,
         .companion {
           width: 31%;
-          color: #1e293b;
+          color: ${theme.textColor};
         }
 
         .muted {
-          color: #94a3b8;
+          color: ${theme.mutedColor};
           font-style: italic;
         }
       </style>
@@ -289,6 +494,7 @@ function buildVisualReportHtml(report: VisualReportPayload): string {
           <div class="stamp">
             <div><strong>Generado:</strong> ${escapeHtml(generatedLabel)}</div>
             <div><strong>Semana base:</strong> ${escapeHtml(report.weekStart)}</div>
+            <div><strong>Diseno:</strong> ${escapeHtml(theme.label)} | ${escapeHtml(layoutLabel)}</div>
           </div>
         </header>
 
@@ -321,6 +527,9 @@ export default function AdminExcelPanel() {
   const [downloading, setDownloading] = useState(false)
   const [downloadingReservations, setDownloadingReservations] = useState(false)
   const [downloadingVisual, setDownloadingVisual] = useState<'png' | 'pdf' | null>(null)
+  const [visualFontSize, setVisualFontSize] = useState(13)
+  const [visualTheme, setVisualTheme] = useState<VisualReportThemeKey>('soft_ocean')
+  const [visualLayout, setVisualLayout] = useState<VisualReportLayout>('side_by_side')
   const [uploading, setUploading] = useState(false)
   const [uploadingReservations, setUploadingReservations] = useState(false)
   const [result, setResult] = useState<ImportResult>(null)
@@ -433,6 +642,14 @@ export default function AdminExcelPanel() {
         return
       }
 
+      const themeForExport = VISUAL_THEMES[visualTheme]
+      const reportWidth = getVisualReportWidth(visualLayout)
+      const reportOptions: VisualReportOptions = {
+        fontSize: visualFontSize,
+        theme: visualTheme,
+        layout: visualLayout,
+      }
+
       const [{ default: html2canvas }, { jsPDF }] = await Promise.all([
         import('html2canvas'),
         import('jspdf'),
@@ -442,9 +659,9 @@ export default function AdminExcelPanel() {
       mountNode.style.position = 'fixed'
       mountNode.style.left = '-10000px'
       mountNode.style.top = '0'
-      mountNode.style.width = '1800px'
+      mountNode.style.width = `${reportWidth}px`
       mountNode.style.pointerEvents = 'none'
-      mountNode.innerHTML = buildVisualReportHtml(report)
+      mountNode.innerHTML = buildVisualReportHtml(report, reportOptions)
       document.body.appendChild(mountNode)
 
       const reportElement = (mountNode.firstElementChild as HTMLElement | null) ?? mountNode
@@ -456,7 +673,7 @@ export default function AdminExcelPanel() {
       const canvas = await html2canvas(reportElement, {
         scale: 3,
         useCORS: true,
-        backgroundColor: '#edf2f7',
+        backgroundColor: themeForExport.canvasColor,
         logging: false,
         windowWidth: reportElement.scrollWidth,
         windowHeight: reportElement.scrollHeight,
@@ -681,7 +898,89 @@ export default function AdminExcelPanel() {
           <p className="text-sm text-gray-500 mb-4">
             Descarga un resumen limpio de reservas confirmadas en alta definición, sin horarios vacíos.
           </p>
-          <div className="space-y-2">
+
+          <div className="space-y-4">
+            <div>
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-xs font-semibold text-gray-600">Tamaño de letra</span>
+                <span className="text-xs font-bold text-gray-700">{visualFontSize}px</span>
+              </div>
+              <input
+                type="range"
+                min={12}
+                max={18}
+                step={1}
+                value={visualFontSize}
+                onChange={(e) => setVisualFontSize(Number(e.target.value))}
+                className="w-full accent-blue-600"
+              />
+              <p className="text-[11px] text-gray-500 mt-1">
+                Rango permitido: 12 a 18.
+              </p>
+            </div>
+
+            <div>
+              <p className="text-xs font-semibold text-gray-600 mb-1.5">Distribución de tablas</p>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setVisualLayout('side_by_side')}
+                  className={`px-2.5 py-2 rounded-lg border text-xs font-semibold transition-colors ${
+                    visualLayout === 'side_by_side'
+                      ? 'bg-blue-600 text-white border-blue-600'
+                      : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                  }`}
+                >
+                  Lado a lado
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setVisualLayout('inline')}
+                  className={`px-2.5 py-2 rounded-lg border text-xs font-semibold transition-colors ${
+                    visualLayout === 'inline'
+                      ? 'bg-blue-600 text-white border-blue-600'
+                      : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-50'
+                  }`}
+                >
+                  En línea
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <p className="text-xs font-semibold text-gray-600 mb-1.5">Paleta profesional (8 temas)</p>
+              <div className="grid grid-cols-2 gap-2">
+                {VISUAL_THEME_ORDER.map((themeKey) => {
+                  const theme = VISUAL_THEMES[themeKey]
+                  const selected = visualTheme === themeKey
+
+                  return (
+                    <button
+                      key={themeKey}
+                      type="button"
+                      onClick={() => setVisualTheme(themeKey)}
+                      className={`text-left p-2 rounded-lg border transition-colors ${
+                        selected
+                          ? 'border-blue-600 ring-1 ring-blue-300 bg-blue-50'
+                          : 'border-gray-300 bg-white hover:bg-gray-50'
+                      }`}
+                    >
+                      <div className="text-xs font-semibold text-gray-800">{theme.label}</div>
+                      <div className="text-[10px] text-gray-500 capitalize">{theme.group}</div>
+                      <div
+                        className="mt-1.5 h-5 rounded-md border"
+                        style={{
+                          background: theme.headerBackground,
+                          borderColor: theme.cardBorder,
+                        }}
+                      />
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div className="space-y-2 pt-1">
             <button
               onClick={() => handleDownloadVisual('png')}
               disabled={downloadingVisual !== null}
@@ -700,6 +999,7 @@ export default function AdminExcelPanel() {
             >
               {downloadingVisual === 'pdf' ? 'Generando PDF...' : 'Descargar PDF HD'}
             </button>
+            </div>
           </div>
         </div>
       </div>
