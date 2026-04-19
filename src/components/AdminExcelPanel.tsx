@@ -32,6 +32,7 @@ export default function AdminExcelPanel() {
   const { user } = useUser()
 
   const [downloading, setDownloading] = useState(false)
+  const [downloadingReservations, setDownloadingReservations] = useState(false)
   const [uploading, setUploading] = useState(false)
   const [result, setResult] = useState<ImportResult>(null)
   const [error, setError] = useState('')
@@ -72,6 +73,42 @@ export default function AdminExcelPanel() {
       setError('Error de conexión al descargar.')
     } finally {
       setDownloading(false)
+    }
+  }
+
+  // =============================================================
+  // Descargar Excel de reservas actuales
+  // =============================================================
+  const handleDownloadReservations = async () => {
+    setDownloadingReservations(true)
+    setError('')
+    setResult(null)
+
+    try {
+      const res = await fetch('/api/admin/reservations/excel', {
+        headers: { 'x-access-key': accessKey },
+      })
+
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}))
+        setError(json.error ?? `Error ${res.status}`)
+        return
+      }
+
+      // Descargar el blob como archivo
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'reservas-actuales.xlsx'
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } catch {
+      setError('Error de conexión al descargar reservas actuales.')
+    } finally {
+      setDownloadingReservations(false)
     }
   }
 
@@ -120,20 +157,18 @@ export default function AdminExcelPanel() {
       {/* ─── Título ─────────────────────────────────────────── */}
       <div>
         <h2 className="text-xl font-bold text-gray-800">
-          📊 Importar / Exportar Usuarios (Excel)
+          📊 Importar / Exportar (Excel)
         </h2>
         <p className="text-sm text-gray-500 mt-1">
-          Descarga el listado actual o sube un archivo Excel para crear y actualizar usuarios en lote.
-          Solo necesitas: <strong>nombre</strong>, <strong>tipo</strong>, <strong>género</strong> y <strong>es_admin</strong>.
-          La clave de acceso se genera automáticamente.
+          Descarga usuarios o reservas actuales, y sube archivo Excel para crear/actualizar usuarios en lote.
         </p>
       </div>
 
       {/* ─── Acciones principales ──────────────────────────── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {/* Descargar */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+        {/* Descargar usuarios */}
         <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
-          <h3 className="font-semibold text-gray-700 mb-2">⬇️ Descargar Excel</h3>
+          <h3 className="font-semibold text-gray-700 mb-2">⬇️ Descargar usuarios</h3>
           <p className="text-sm text-gray-500 mb-4">
             Exporta todos los usuarios de tu congregación con sus datos actuales.
           </p>
@@ -148,9 +183,26 @@ export default function AdminExcelPanel() {
           </button>
         </div>
 
-        {/* Subir */}
+        {/* Descargar reservas actuales */}
         <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
-          <h3 className="font-semibold text-gray-700 mb-2">⬆️ Subir Excel</h3>
+          <h3 className="font-semibold text-gray-700 mb-2">📅 Descargar reservas actuales</h3>
+          <p className="text-sm text-gray-500 mb-4">
+            Exporta la semana activa con la configuración actual (usuario y acompañante por turno).
+          </p>
+          <button
+            onClick={handleDownloadReservations}
+            disabled={downloadingReservations}
+            className="w-full px-4 py-2.5 bg-blue-600 text-white rounded-lg font-medium
+                       hover:bg-blue-700 disabled:opacity-50 disabled:cursor-wait
+                       transition-colors"
+          >
+            {downloadingReservations ? 'Descargando...' : 'Descargar reservas.xlsx'}
+          </button>
+        </div>
+
+        {/* Subir usuarios */}
+        <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
+          <h3 className="font-semibold text-gray-700 mb-2">⬆️ Subir usuarios</h3>
           <p className="text-sm text-gray-500 mb-4">
             Sube un archivo para crear usuarios nuevos o actualizar existentes.
           </p>
