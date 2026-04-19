@@ -179,21 +179,37 @@ function parseStartTime(value: unknown): string | null {
   return `${String(hours).padStart(2, '0')}:${mins}:00`
 }
 
+function parseAssigneeCell(value: unknown): string {
+  const raw = String(value ?? '').trim()
+  if (!raw) return ''
+
+  const normalized = normalizeText(raw)
+  if (['no disponible', 'no-disponible', 'n/a', 'na', 'nd', 'bloqueado'].includes(normalized)) {
+    return ''
+  }
+
+  return raw
+}
+
 function parseBlockedInstruction(
   blockedRaw: unknown,
   estadoRaw: unknown,
 ): { value: boolean | null; error?: string } {
   const blocked = normalizeText(blockedRaw)
   if (blocked) {
-    if (['si', 'sí', 'yes', 'true', '1', 'bloqueado'].includes(blocked)) {
+    if (
+      ['si', 'yes', 'true', '1', 'bloqueado', 'no disponible', 'no-disponible', 'inactivo'].includes(
+        blocked,
+      )
+    ) {
       return { value: true }
     }
-    if (['no', 'false', '0', 'libre', 'parcial', 'completo'].includes(blocked)) {
+    if (['no', 'false', '0', 'libre', 'parcial', 'completo', 'disponible', 'activo'].includes(blocked)) {
       return { value: false }
     }
     return {
       value: null,
-      error: 'valor inválido. Usa Sí/No (o Bloqueado/Libre).',
+      error: 'valor inválido. Usa No disponible/Bloqueado o Disponible/No.',
     }
   }
 
@@ -336,15 +352,16 @@ export async function GET(req: NextRequest) {
 
   const rows = sortedSlots.map((slot) => {
     const occ = reservationMap.get(slot.id) ?? { pos1: '', pos2: '' }
+    const blockedLabel = slot.is_active ? '' : 'No disponible'
 
     return {
       semana: activeWeek,
       exhibidor: getExhibitorName(slot.exhibitor),
       dia: DAY_LABELS[slot.day_of_week] ?? String(slot.day_of_week),
       hora: `${shortTime(slot.start_time)} - ${shortTime(slot.end_time)}`,
-      usuario: occ.pos1,
-      acompanante: occ.pos2,
-      bloqueado: slot.is_active ? 'No' : 'Sí',
+      usuario: slot.is_active ? occ.pos1 : 'No disponible',
+      acompanante: slot.is_active ? occ.pos2 : 'No disponible',
+      bloqueado: blockedLabel,
       motivo_bloqueo: slot.block_reason ?? '',
     }
   })
@@ -539,11 +556,18 @@ export async function POST(req: NextRequest) {
     const exhibitorRaw = String(row.exhibidor ?? row.exhibitor ?? '').trim()
     const dayRaw = row.dia ?? row.day ?? ''
     const hourRaw = row.hora ?? row.hour ?? ''
-    const userRaw = String(row.usuario ?? row.user ?? '').trim()
-    const companionRaw = String(row.acompanante ?? '').trim()
+    let userRaw = parseAssigneeCell(row.usuario ?? row.user ?? '')
+    let companionRaw = parseAssigneeCell(row.acompanante ?? '')
     const blockedRaw = row.bloqueado ?? ''
     const estadoRaw = row.estado ?? ''
     const blockReasonRaw = String(row.motivo_bloqueo ?? '').trim()
+
+    // Si el principal quedó vacío pero hay acompañante, promovemos el acompañante
+    // para evitar que el archivo sea rechazado por una edición parcial.
+    if (!userRaw && companionRaw) {
+      userRaw = companionRaw
+      companionRaw = ''
+    }
 
     const hasAnyValue = [
       exhibitorRaw,
@@ -711,10 +735,9 @@ export async function POST(req: NextRequest) {
     await Promise.all([
       supabase
         .from('reservations')
-        .update({ status: 'cancelled' })
+        .delete()
         .eq('congregation_id', admin.congregation_id)
-        .eq('week_start', targetWeek)
-        .neq('status', 'cancelled'),
+        .eq('week_start', targetWeek),
       supabase
         .from('invitations')
         .update({ status: 'declined' })

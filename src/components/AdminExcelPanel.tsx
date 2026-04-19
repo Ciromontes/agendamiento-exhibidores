@@ -435,10 +435,11 @@ export default function AdminExcelPanel() {
             <h4 className="font-medium text-gray-700 mb-1">Flujo recomendado (reservas de semana siguiente):</h4>
             <ol className="list-decimal list-inside space-y-1">
               <li>Descarga <strong>reservas actuales</strong>.</li>
-              <li>Edita: <strong>usuario</strong>, <strong>acompanante</strong> y opcionalmente <strong>bloqueado</strong> (Sí/No).</li>
+              <li>Edita: <strong>usuario</strong>, <strong>acompanante</strong> y opcionalmente <strong>bloqueado</strong>.</li>
               <li>Deja usuario y acompañante vacíos para un turno libre.</li>
               <li>No necesitas escribir estados como Libre/Parcial/Completo; el sistema lo deduce automáticamente.</li>
-              <li>Si marcas <strong>bloqueado=Sí</strong>, no debe haber usuario ni acompañante en esa fila.</li>
+              <li>Para bloquear usa <strong>No disponible</strong> (o Bloqueado). Para desbloquear usa <strong>Disponible</strong> (o No).</li>
+              <li>En turnos bloqueados verás <strong>No disponible</strong> en usuario/acompañante.</li>
               <li>Sube el archivo con <strong>Subir reservas (semana siguiente)</strong>.</li>
               <li>El sistema validará nombres/horarios y aplicará el resultado a la próxima semana.</li>
             </ol>
