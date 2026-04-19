@@ -310,6 +310,11 @@ export default function AdminExcelPanel() {
           {result.rejected && (
             <div className="bg-red-100 border border-red-300 rounded-lg p-4 text-red-800 text-sm font-medium">
               🚫 {result.message ?? 'El archivo fue rechazado. No se guardó ningún cambio.'}
+              {result.errors.length > 0 && (
+                <p className="mt-2 text-xs font-normal">
+                  Primer error detectado: <strong>{result.errors[0]}</strong>
+                </p>
+              )}
             </div>
           )}
 
@@ -430,11 +435,16 @@ export default function AdminExcelPanel() {
             <h4 className="font-medium text-gray-700 mb-1">Flujo recomendado (reservas de semana siguiente):</h4>
             <ol className="list-decimal list-inside space-y-1">
               <li>Descarga <strong>reservas actuales</strong>.</li>
-              <li>Edita solo: <strong>usuario</strong> y <strong>acompanante</strong> por fila (exhibidor/día/hora deben conservarse).</li>
+              <li>Edita: <strong>usuario</strong>, <strong>acompanante</strong> y opcionalmente <strong>bloqueado</strong> (Sí/No).</li>
               <li>Deja usuario y acompañante vacíos para un turno libre.</li>
+              <li>No necesitas escribir estados como Libre/Parcial/Completo; el sistema lo deduce automáticamente.</li>
+              <li>Si marcas <strong>bloqueado=Sí</strong>, no debe haber usuario ni acompañante en esa fila.</li>
               <li>Sube el archivo con <strong>Subir reservas (semana siguiente)</strong>.</li>
               <li>El sistema validará nombres/horarios y aplicará el resultado a la próxima semana.</li>
             </ol>
+            <p className="text-xs text-gray-500 mt-2">
+              Los errores se reportan con formato: <strong>Fila X, columna Y</strong> para corregir rápido.
+            </p>
           </div>
 
           <div className="bg-amber-50 border border-amber-200 rounded-lg p-3">

@@ -9,7 +9,7 @@
  * Requiere header: x-access-key: <admin_access_key>
  *
  * Columnas del archivo:
- *   semana | exhibidor | dia | hora | usuario | acompanante | estado | motivo_bloqueo
+ *   semana | exhibidor | dia | hora | usuario | acompanante | bloqueado | motivo_bloqueo
  * ─────────────────────────────────────────────────────────────
  */
 import { NextRequest, NextResponse } from 'next/server'
@@ -43,6 +43,7 @@ type SlotLookupRow = {
   day_of_week: number
   start_time: string
   is_active: boolean
+  block_reason: string | null
 }
 
 type UserLookupRow = {
@@ -178,6 +179,32 @@ function parseStartTime(value: unknown): string | null {
   return `${String(hours).padStart(2, '0')}:${mins}:00`
 }
 
+function parseBlockedInstruction(
+  blockedRaw: unknown,
+  estadoRaw: unknown,
+): { value: boolean | null; error?: string } {
+  const blocked = normalizeText(blockedRaw)
+  if (blocked) {
+    if (['si', 'sí', 'yes', 'true', '1', 'bloqueado'].includes(blocked)) {
+      return { value: true }
+    }
+    if (['no', 'false', '0', 'libre', 'parcial', 'completo'].includes(blocked)) {
+      return { value: false }
+    }
+    return {
+      value: null,
+      error: 'valor inválido. Usa Sí/No (o Bloqueado/Libre).',
+    }
+  }
+
+  // Compatibilidad con plantillas antiguas que traían columna "estado".
+  const estado = normalizeText(estadoRaw)
+  if (estado === 'bloqueado') return { value: true }
+  if (['libre', 'parcial', 'completo'].includes(estado)) return { value: false }
+
+  return { value: null }
+}
+
 export async function GET(req: NextRequest) {
   const admin = await verifyAdmin(req)
   if (!admin) {
@@ -225,7 +252,7 @@ export async function GET(req: NextRequest) {
       { wch: 16 }, // hora
       { wch: 28 }, // usuario
       { wch: 28 }, // acompanante
-      { wch: 12 }, // estado
+      { wch: 12 }, // bloqueado
       { wch: 26 }, // motivo_bloqueo
     ]
     const wb = XLSX.utils.book_new()
@@ -310,11 +337,6 @@ export async function GET(req: NextRequest) {
   const rows = sortedSlots.map((slot) => {
     const occ = reservationMap.get(slot.id) ?? { pos1: '', pos2: '' }
 
-    let estado = 'Libre'
-    if (!slot.is_active) estado = 'Bloqueado'
-    else if (occ.pos1 && occ.pos2) estado = 'Completo'
-    else if (occ.pos1 || occ.pos2) estado = 'Parcial'
-
     return {
       semana: activeWeek,
       exhibidor: getExhibitorName(slot.exhibitor),
@@ -322,7 +344,7 @@ export async function GET(req: NextRequest) {
       hora: `${shortTime(slot.start_time)} - ${shortTime(slot.end_time)}`,
       usuario: occ.pos1,
       acompanante: occ.pos2,
-      estado,
+      bloqueado: slot.is_active ? 'No' : 'Sí',
       motivo_bloqueo: slot.block_reason ?? '',
     }
   })
@@ -336,7 +358,7 @@ export async function GET(req: NextRequest) {
     { wch: 16 }, // hora
     { wch: 28 }, // usuario
     { wch: 28 }, // acompanante
-    { wch: 12 }, // estado
+    { wch: 12 }, // bloqueado
     { wch: 26 }, // motivo_bloqueo
   ]
 
@@ -432,7 +454,7 @@ export async function POST(req: NextRequest) {
 
   const { data: slots, error: slotError } = await supabase
     .from('time_slots')
-    .select('id, exhibitor_id, day_of_week, start_time, is_active')
+    .select('id, exhibitor_id, day_of_week, start_time, is_active, block_reason')
     .eq('congregation_id', admin.congregation_id)
     .in('exhibitor_id', exhibitorIds)
 
@@ -475,17 +497,22 @@ export async function POST(req: NextRequest) {
   const errors: string[] = []
   const assignments: ImportAssignment[] = []
   let skipped = 0
-  const slotUsed = new Set<string>()
+  const seenSlotRows = new Set<string>()
+  const slotUpdates = new Map<string, { is_active: boolean; block_reason: string | null }>()
+
+  const addCellError = (rowNum: number, column: string, detail: string) => {
+    errors.push(`Fila ${rowNum}, columna "${column}": ${detail}`)
+  }
 
   const resolveExhibitor = (name: string, rowNum: number): ExhibitorLookupRow | null => {
     const normalized = normalizeText(name)
     const found = exhibitorsByName.get(normalized) ?? []
     if (found.length === 0) {
-      errors.push(`Fila ${rowNum}: exhibidor "${name}" no existe en esta congregación.`)
+      addCellError(rowNum, 'exhibidor', `"${name}" no existe en esta congregación.`)
       return null
     }
     if (found.length > 1) {
-      errors.push(`Fila ${rowNum}: exhibidor ambiguo "${name}". Usa un nombre único.`)
+      addCellError(rowNum, 'exhibidor', `valor ambiguo "${name}". Usa un nombre único.`)
       return null
     }
     return found[0]
@@ -495,11 +522,11 @@ export async function POST(req: NextRequest) {
     const normalized = normalizeText(name)
     const found = usersByName.get(normalized) ?? []
     if (found.length === 0) {
-      errors.push(`Fila ${rowNum}: ${label} "${name}" no existe o está inactivo.`)
+      addCellError(rowNum, label, `"${name}" no existe o está inactivo.`)
       return null
     }
     if (found.length > 1) {
-      errors.push(`Fila ${rowNum}: ${label} ambiguo "${name}". Se requieren nombres únicos.`)
+      addCellError(rowNum, label, `valor ambiguo "${name}". Se requieren nombres únicos.`)
       return null
     }
     return found[0]
@@ -514,8 +541,19 @@ export async function POST(req: NextRequest) {
     const hourRaw = row.hora ?? row.hour ?? ''
     const userRaw = String(row.usuario ?? row.user ?? '').trim()
     const companionRaw = String(row.acompanante ?? '').trim()
+    const blockedRaw = row.bloqueado ?? ''
+    const estadoRaw = row.estado ?? ''
+    const blockReasonRaw = String(row.motivo_bloqueo ?? '').trim()
 
-    const hasAnyValue = [exhibitorRaw, dayRaw, hourRaw, userRaw, companionRaw].some(
+    const hasAnyValue = [
+      exhibitorRaw,
+      dayRaw,
+      hourRaw,
+      userRaw,
+      companionRaw,
+      blockedRaw,
+      blockReasonRaw,
+    ].some(
       (v) => String(v ?? '').trim() !== '',
     )
     if (!hasAnyValue) {
@@ -524,19 +562,23 @@ export async function POST(req: NextRequest) {
     }
 
     if (!exhibitorRaw) {
-      errors.push(`Fila ${rowNum}: falta exhibidor.`)
+      addCellError(rowNum, 'exhibidor', 'falta valor obligatorio.')
       continue
     }
 
     const dayOfWeek = parseDayOfWeek(dayRaw)
     if (dayOfWeek === null) {
-      errors.push(`Fila ${rowNum}: día inválido "${String(dayRaw)}".`)
+      addCellError(rowNum, 'dia', `valor inválido "${String(dayRaw)}".`)
       continue
     }
 
     const startTime = parseStartTime(hourRaw)
     if (!startTime) {
-      errors.push(`Fila ${rowNum}: hora inválida "${String(hourRaw)}". Usa formato HH:mm o HH:mm - HH:mm.`)
+      addCellError(
+        rowNum,
+        'hora',
+        `valor inválido "${String(hourRaw)}". Usa formato HH:mm o HH:mm - HH:mm.`,
+      )
       continue
     }
 
@@ -547,10 +589,36 @@ export async function POST(req: NextRequest) {
     const slot = slotMap.get(slotKey)
 
     if (!slot) {
-      errors.push(
-        `Fila ${rowNum}: no existe un slot para ${exhibitorRaw} (${String(dayRaw)} ${shortTime(startTime)}).`,
+      addCellError(
+        rowNum,
+        'hora',
+        `no existe slot para ${exhibitorRaw} (${String(dayRaw)} ${shortTime(startTime)}).`,
       )
       continue
+    }
+
+    if (seenSlotRows.has(slot.id)) {
+      addCellError(rowNum, 'hora', 'slot duplicado en el archivo. Usa una sola fila por horario.')
+      continue
+    }
+    seenSlotRows.add(slot.id)
+
+    const blockedInstruction = parseBlockedInstruction(blockedRaw, estadoRaw)
+    if (blockedInstruction.error) {
+      addCellError(rowNum, 'bloqueado', blockedInstruction.error)
+      continue
+    }
+
+    const currentBlocked = !slot.is_active
+    const effectiveBlocked = blockedInstruction.value === null ? currentBlocked : blockedInstruction.value
+
+    if (blockedInstruction.value !== null) {
+      if (blockedInstruction.value) {
+        const reasonToSave = blockReasonRaw || slot.block_reason || 'Bloqueado desde Excel'
+        slotUpdates.set(slot.id, { is_active: false, block_reason: reasonToSave })
+      } else {
+        slotUpdates.set(slot.id, { is_active: true, block_reason: null })
+      }
     }
 
     if (!userRaw && !companionRaw) {
@@ -558,18 +626,17 @@ export async function POST(req: NextRequest) {
       continue
     }
 
-    if (!slot.is_active) {
-      errors.push(`Fila ${rowNum}: el slot está bloqueado/inactivo y no puede recibir reservas.`)
-      continue
-    }
-
     if (!userRaw && companionRaw) {
-      errors.push(`Fila ${rowNum}: no puedes definir acompañante sin usuario principal.`)
+      addCellError(rowNum, 'usuario', 'no puedes definir acompañante sin usuario principal.')
       continue
     }
 
-    if (slotUsed.has(slot.id)) {
-      errors.push(`Fila ${rowNum}: slot duplicado en el archivo. Usa una sola fila por horario.`)
+    if (effectiveBlocked) {
+      addCellError(
+        rowNum,
+        'bloqueado',
+        'el slot está marcado como bloqueado. Desbloquéalo para asignar usuario/acompañante.',
+      )
       continue
     }
 
@@ -581,12 +648,10 @@ export async function POST(req: NextRequest) {
       companionUser = resolveUser(companionRaw, rowNum, 'acompanante')
       if (!companionUser) continue
       if (companionUser.id === mainUser.id) {
-        errors.push(`Fila ${rowNum}: usuario y acompañante no pueden ser la misma persona.`)
+        addCellError(rowNum, 'acompanante', 'usuario y acompañante no pueden ser la misma persona.')
         continue
       }
     }
-
-    slotUsed.add(slot.id)
 
     assignments.push({
       time_slot_id: slot.id,
@@ -623,6 +688,23 @@ export async function POST(req: NextRequest) {
       },
       { status: 422 },
     )
+  }
+
+  let updated = 0
+  for (const [slotId, patch] of slotUpdates.entries()) {
+    const { error: slotUpdateError } = await supabase
+      .from('time_slots')
+      .update(patch)
+      .eq('id', slotId)
+      .eq('congregation_id', admin.congregation_id)
+
+    if (slotUpdateError) {
+      return NextResponse.json(
+        { error: 'No se pudo actualizar bloqueos de slots: ' + slotUpdateError.message },
+        { status: 500 },
+      )
+    }
+    updated++
   }
 
   const [{ error: clearResError }, { error: clearInvError }, { error: clearReliefError }, { error: clearAbsError }] =
@@ -687,7 +769,7 @@ export async function POST(req: NextRequest) {
     ok: true,
     totalRows: rows.length,
     created,
-    updated: 0,
+    updated,
     skipped,
     errors: [],
     message: `Reservas aplicadas correctamente para la semana ${targetWeek}.`,
