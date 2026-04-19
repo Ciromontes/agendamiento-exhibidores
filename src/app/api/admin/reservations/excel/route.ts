@@ -17,6 +17,9 @@ import * as XLSX from 'xlsx'
 import { verifyAdmin } from '@/lib/supabase/admin-auth'
 import { createServiceClient } from '@/lib/supabase/service'
 
+export const dynamic = 'force-dynamic'
+export const revalidate = 0
+
 type TimeSlotRow = {
   id: string
   day_of_week: number
@@ -302,6 +305,9 @@ export async function GET(req: NextRequest) {
       headers: {
         'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
         'Content-Disposition': `attachment; filename="reservas-actuales-${activeWeek}.xlsx"`,
+        'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+        Pragma: 'no-cache',
+        Expires: '0',
       },
     })
   }
@@ -417,6 +423,9 @@ export async function GET(req: NextRequest) {
     headers: {
       'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': `attachment; filename="${fileName}"`,
+      'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+      Pragma: 'no-cache',
+      Expires: '0',
     },
   })
 }

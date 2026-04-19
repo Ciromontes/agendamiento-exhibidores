@@ -54,6 +54,12 @@ self.addEventListener('fetch', event => {
   // Ignorar el WebSocket HMR de Next.js en desarrollo
   if (url.pathname.startsWith('/_next/webpack-hmr')) return
 
+  // Nunca cachear API internas: deben reflejar datos en tiempo real.
+  if (url.pathname.startsWith('/api/')) {
+    event.respondWith(fetch(request))
+    return
+  }
+
   // ─── 1. Cache-First: assets estáticos, iconos, fuentes ───
   const isStaticAsset =
     url.pathname.startsWith('/_next/static/') ||

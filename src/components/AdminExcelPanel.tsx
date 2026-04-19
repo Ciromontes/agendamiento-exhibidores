@@ -88,7 +88,8 @@ export default function AdminExcelPanel() {
     setResult(null)
 
     try {
-      const res = await fetch('/api/admin/reservations/excel', {
+      const res = await fetch(`/api/admin/reservations/excel?t=${Date.now()}`, {
+        cache: 'no-store',
         headers: { 'x-access-key': accessKey },
       })
 
