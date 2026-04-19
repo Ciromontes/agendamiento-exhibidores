@@ -7,6 +7,7 @@
  *   - reset_current: reinicia la semana activa (cancela reservas activas)
  *   - advance_blank: abre nueva semana en blanco (cancela reservas desde semana activa)
  *   - advance_keep:  abre nueva semana copiando cupos actuales
+ *   - advance_only:  avanza semana sin tocar las reservas ya cargadas
  *
  * Requiere header: x-access-key: <admin_access_key>
  * ─────────────────────────────────────────────────────────────
@@ -15,7 +16,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { verifyAdmin } from '@/lib/supabase/admin-auth'
 import { createServiceClient } from '@/lib/supabase/service'
 
-type WeekActionMode = 'reset_current' | 'advance_blank' | 'advance_keep'
+type WeekActionMode = 'reset_current' | 'advance_blank' | 'advance_keep' | 'advance_only'
 
 function addDays(dateStr: string, days: number): string {
   const d = new Date(dateStr + 'T12:00:00')
@@ -24,7 +25,12 @@ function addDays(dateStr: string, days: number): string {
 }
 
 function isWeekActionMode(value: unknown): value is WeekActionMode {
-  return value === 'reset_current' || value === 'advance_blank' || value === 'advance_keep'
+  return (
+    value === 'reset_current' ||
+    value === 'advance_blank' ||
+    value === 'advance_keep' ||
+    value === 'advance_only'
+  )
 }
 
 export async function POST(req: NextRequest) {
@@ -42,7 +48,7 @@ export async function POST(req: NextRequest) {
 
   if (!isWeekActionMode(body.mode)) {
     return NextResponse.json(
-      { error: 'Modo inválido. Usa: reset_current, advance_blank o advance_keep.' },
+      { error: 'Modo inválido. Usa: reset_current, advance_blank, advance_keep o advance_only.' },
       { status: 400 },
     )
   }
@@ -167,6 +173,28 @@ export async function POST(req: NextRequest) {
       mode: body.mode,
       active_week_start: nextWeek,
       message: 'Nueva semana abierta en blanco. Reservas reiniciadas desde la semana activa.',
+    })
+  }
+
+  if (body.mode === 'advance_only') {
+    const { error: cfgUpdateError } = await supabase
+      .from('app_config')
+      .update({ active_week_start: nextWeek })
+      .eq('id', cfg.id)
+      .eq('congregation_id', admin.congregation_id)
+
+    if (cfgUpdateError) {
+      return NextResponse.json(
+        { error: 'No se pudo avanzar la semana: ' + cfgUpdateError.message },
+        { status: 500 },
+      )
+    }
+
+    return NextResponse.json({
+      ok: true,
+      mode: body.mode,
+      active_week_start: nextWeek,
+      message: 'Semana avanzada sin modificar reservas existentes.',
     })
   }
 

@@ -45,7 +45,7 @@ type ConfigData = {
   last_week_compensation: boolean
 }
 
-type WeekActionMode = 'reset_current' | 'advance_blank' | 'advance_keep'
+type WeekActionMode = 'reset_current' | 'advance_blank' | 'advance_keep' | 'advance_only'
 
 export default function AdminConfigPanel() {
   // ─── Estado ────────────────────────────────────────────────
@@ -106,6 +106,7 @@ export default function AdminConfigPanel() {
       reset_current: 'reiniciar la semana en curso y dejar todos los turnos en cero',
       advance_blank: 'abrir la nueva semana en blanco (sin reservas)',
       advance_keep: 'abrir la nueva semana manteniendo los cupos actuales',
+      advance_only: 'abrir la siguiente semana sin modificar las reservas ya cargadas',
     }
 
     const ok = window.confirm(
@@ -354,7 +355,21 @@ export default function AdminConfigPanel() {
           <p className="text-xs text-indigo-500 mt-0.5 capitalize">Empieza el {weekInfo.full}</p>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+          <button
+            onClick={() => handleWeekQuickAction('advance_only')}
+            disabled={weekActionLoading !== null}
+            className="text-left rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3 hover:bg-indigo-100 transition disabled:opacity-60"
+          >
+            <p className="text-sm font-bold text-indigo-800">Abrir siguiente semana (sin tocar cupos)</p>
+            <p className="text-xs text-indigo-700 mt-1">
+              Avanza a <strong className="capitalize">{weekInfo.nextRange}</strong> respetando reservas ya cargadas.
+            </p>
+            <p className="text-[11px] text-indigo-600 mt-2">
+              {weekActionLoading === 'advance_only' ? 'Procesando...' : '⚠️ Pide confirmación de seguridad'}
+            </p>
+          </button>
+
           <button
             onClick={() => handleWeekQuickAction('reset_current')}
             disabled={weekActionLoading !== null}
