@@ -231,7 +231,7 @@ function parseBlockedInstruction(
     }
     return {
       value: null,
-      error: 'valor inválido. Usa No disponible/Bloqueado o Disponible/No.',
+      error: 'valor inválido. Usa No Disponible/Bloqueado o Disponible/No.',
     }
   }
 
@@ -374,11 +374,11 @@ export async function GET(req: NextRequest) {
 
   const rows = sortedSlots.map((slot) => {
     const occ = reservationMap.get(slot.id) ?? { pos1: '', pos2: '' }
-    const blockedLabel = slot.is_active ? '' : 'No disponible'
+    const blockedLabel = slot.is_active ? '' : 'No Disponible'
     const rawReason = String(slot.block_reason ?? '').trim()
     const normalizedReason = normalizeText(rawReason)
     const reasonLabel = !slot.is_active && (!rawReason || normalizedReason === 'bloqueado desde excel')
-      ? 'No disponible'
+      ? 'No Disponible'
       : rawReason
 
     return {
@@ -386,8 +386,8 @@ export async function GET(req: NextRequest) {
       exhibidor: getExhibitorName(slot.exhibitor),
       dia: DAY_LABELS[slot.day_of_week] ?? String(slot.day_of_week),
       hora: `${shortTime(slot.start_time)} - ${shortTime(slot.end_time)}`,
-      usuario: slot.is_active ? occ.pos1 : 'No disponible',
-      acompanante: slot.is_active ? occ.pos2 : 'No disponible',
+      usuario: slot.is_active ? occ.pos1 : 'No Disponible',
+      acompanante: slot.is_active ? occ.pos2 : 'No Disponible',
       bloqueado: blockedLabel,
       motivo_bloqueo: reasonLabel,
     }
@@ -684,7 +684,7 @@ export async function POST(req: NextRequest) {
 
     if (blockedInstruction.value !== null) {
       if (blockedInstruction.value) {
-        const reasonToSave = blockReasonRaw || slot.block_reason || 'No disponible'
+        const reasonToSave = blockReasonRaw || slot.block_reason || 'No Disponible'
         slotUpdates.set(slot.id, { is_active: false, block_reason: reasonToSave })
       } else {
         slotUpdates.set(slot.id, { is_active: true, block_reason: null })

@@ -90,6 +90,28 @@ function getSlotDatetime(weekStart: string, dayOfWeek: number, startTime: string
   return d
 }
 
+function getDisplayBlockReason(reason: string | null | undefined): string {
+  const raw = String(reason ?? '').trim()
+  if (!raw) return 'No Disponible'
+
+  const normalized = raw
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  if (
+    normalized === 'bloqueado desde excel' ||
+    normalized === 'no disponible' ||
+    normalized === 'no-disponible'
+  ) {
+    return 'No Disponible'
+  }
+
+  return raw
+}
+
 // Tipo extendido para candidatos de invitación (incluye detección de turno huérfano)
 type InviteCandidate = Pick<User, 'id' | 'name' | 'user_type'> & {
   hasOrphanConflict: boolean
@@ -1209,7 +1231,7 @@ export default function ExhibitorGrid() {
                       return (
                         <td key={dayNum} className="px-2 py-2 text-center">
                           <div className="bg-gray-200 text-gray-500 rounded-lg px-2 py-3 text-xs font-medium">
-                            {blockedSlot.block_reason}
+                            {getDisplayBlockReason(blockedSlot.block_reason)}
                           </div>
                         </td>
                       )
@@ -1227,7 +1249,7 @@ export default function ExhibitorGrid() {
                       return (
                         <td key={dayNum} className="px-2 py-2 text-center">
                           <div className="bg-gray-200 text-gray-500 rounded-lg px-2 py-3 text-xs font-medium">
-                            {slot.block_reason}
+                            {getDisplayBlockReason(slot.block_reason)}
                           </div>
                         </td>
                       )

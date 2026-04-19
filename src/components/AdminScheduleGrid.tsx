@@ -20,6 +20,28 @@ import { createClient } from '@/lib/supabase/client'
 import { Exhibitor, TimeSlot, DAYS_OF_WEEK, DAY_ORDER, formatTimeLabel } from '@/types'
 import { useUser } from '@/context/UserContext'
 
+function getDisplayBlockReason(reason: string | null | undefined): string {
+  const raw = String(reason ?? '').trim()
+  if (!raw) return 'No Disponible'
+
+  const normalized = raw
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  if (
+    normalized === 'bloqueado desde excel' ||
+    normalized === 'no disponible' ||
+    normalized === 'no-disponible'
+  ) {
+    return 'No Disponible'
+  }
+
+  return raw
+}
+
 export default function AdminScheduleGrid() {
   // --- Estado del componente ---
   const [exhibitors, setExhibitors] = useState<Exhibitor[]>([])
@@ -704,7 +726,7 @@ export default function AdminScheduleGrid() {
                             <div className="text-[10px] font-semibold text-purple-500 mb-0.5">
                               {formatTimeLabel(slot.start_time, slot.end_time)}
                             </div>
-                            🔒 {slot.block_reason}
+                            🔒 {getDisplayBlockReason(slot.block_reason)}
                           </div>
                           <button
                             onClick={() => handleDeleteSlot(slot.id)}
