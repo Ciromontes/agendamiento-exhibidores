@@ -40,6 +40,7 @@ export default function NotificationBell({ onBellClick }: Props) {
       .from('invitations')
       .select('id', { count: 'exact', head: true })
       .eq('to_user_id', user.id)
+      .eq('congregation_id', user.congregation_id)
       .eq('status', 'pending')
       .gt('expires_at', nowIso)
     setInvitationCount(invCount ?? 0)
@@ -49,6 +50,7 @@ export default function NotificationBell({ onBellClick }: Props) {
       .from('relief_requests')
       .select('id, slot_id, week_start, to_user_id, from_user_id')
       .neq('from_user_id', user.id)
+      .eq('congregation_id', user.congregation_id)
       .eq('status', 'pending')
       .gt('expires_at', nowIso)
 
@@ -74,6 +76,7 @@ export default function NotificationBell({ onBellClick }: Props) {
         .select('time_slot_id, week_start, user_id, user:users!reservations_user_id_fkey(id, gender)')
         .in('time_slot_id', slotIds)
         .in('week_start', weekStarts)
+        .eq('congregation_id', user.congregation_id)
         .neq('status', 'cancelled')
 
       type OccupantInfo = { userId: string; gender: string | null }

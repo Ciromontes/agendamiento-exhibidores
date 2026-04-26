@@ -59,10 +59,10 @@ type ReservationItem = {
 export default function GlobalReliefButton() {
   const { user } = useUser()
   const supabase = createClient()
-  const weekStart = getCurrentWeekStart()
   const congregationId = user?.congregation_id ?? ''
 
   // ─── Estado principal ────────────────────────────────────
+  const [weekStart, setWeekStart] = useState(getCurrentWeekStart())
   const [reservations, setReservations] = useState<ReservationItem[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
@@ -79,8 +79,16 @@ export default function GlobalReliefButton() {
   const fetchData = useCallback(async () => {
     if (!user) return
     setLoading(true)
+    const { data: config } = await supabase
+      .from('app_config')
+      .select('active_week_start')
+      .eq('congregation_id', congregationId)
+      .limit(1)
+      .single()
+    const effectiveWeekStart = (config?.active_week_start as string | null) ?? getCurrentWeekStart()
+    setWeekStart(effectiveWeekStart)
 
-    // Reservas activas de esta semana con detalle del slot
+    // Reservas activas de la semana ACTIVA con detalle del slot
     const { data: resData } = await supabase
       .from('reservations')
       .select(`
@@ -88,7 +96,8 @@ export default function GlobalReliefButton() {
         slot:time_slots!reservations_time_slot_id_fkey(day_of_week, start_time, end_time)
       `)
       .eq('user_id', user.id)
-      .eq('week_start', weekStart)
+      .eq('congregation_id', congregationId)
+      .eq('week_start', effectiveWeekStart)
       .neq('status', 'cancelled')
 
     if (!resData || resData.length === 0) {
@@ -105,6 +114,7 @@ export default function GlobalReliefButton() {
       .select('reservation_id')
       .in('reservation_id', reservationIds)
       .eq('from_user_id', user.id)
+      .eq('congregation_id', congregationId)
       .eq('status', 'pending')
       .gt('expires_at', nowIso)
 
@@ -118,7 +128,7 @@ export default function GlobalReliefButton() {
     setReservations(items)
     setLoading(false)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id, weekStart])
+  }, [user?.id, congregationId])
 
   useEffect(() => { fetchData() }, [fetchData])
 
@@ -144,7 +154,7 @@ export default function GlobalReliefButton() {
 
   // ─── Enviar solicitudes de relevo ─────────────────────────
   const handleConfirm = async () => {
-    if (!user || selected.size === 0) return
+    if (!user || selected.size === 0 || !weekStart) return
     setSending(true)
 
     const selectedItems = reservations.filter(r => selected.has(r.id))
@@ -189,7 +199,6 @@ export default function GlobalReliefButton() {
   // ─── Derivados de UI ─────────────────────────────────────
   const totalReservations = reservations.length
   const pendingCount      = reservations.filter(r => r.hasPendingRelief).length
-  const available         = reservations.filter(r => !r.hasPendingRelief)
   const allHavePending    = totalReservations > 0 && pendingCount === totalReservations
 
   return (
