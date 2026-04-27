@@ -49,29 +49,41 @@ export default function ReliefBadge() {
     // Cargar modo de conteo y límites de relevos
     const { data: config } = await supabase
       .from('app_config')
-      .select('counting_mode, relief_limit_publicador, relief_limit_precursor')
+      .select('counting_mode, active_week_start, relief_limit_publicador, relief_limit_precursor')
       .eq('congregation_id', user.congregation_id)
       .limit(1)
       .single()
     const mode = config?.counting_mode ?? 'weekly'
-
-    // Contar mis reservas actuales para saber si tengo cupo
-    const weekStart = (() => {
+    const activeWeekStart = (config?.active_week_start as string | null) ?? (() => {
       const now = new Date(); const day = now.getDay()
       const diff = now.getDate() - day + (day === 0 ? -6 : 1)
       const m = new Date(now.getFullYear(), now.getMonth(), diff)
       return m.toISOString().split('T')[0]
     })()
-    const monthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+
+    // Contar mis reservas actuales para saber si tengo cupo
+    const activeWeekDate = new Date(`${activeWeekStart}T12:00:00`)
+    const monthStart = new Date(activeWeekDate.getFullYear(), activeWeekDate.getMonth(), 1)
+      .toISOString().split('T')[0]
+    const monthEnd = new Date(activeWeekDate.getFullYear(), activeWeekDate.getMonth() + 1, 1)
       .toISOString().split('T')[0]
 
-    const { count: myCount } = await supabase
+    let myCountQuery = supabase
       .from('reservations')
       .select('id', { count: 'exact', head: true })
       .eq('user_id', user.id)
-      .eq(mode === 'monthly' ? 'week_start' : 'week_start', mode === 'monthly' ? monthStart : weekStart)
-      .gte('week_start', mode === 'monthly' ? monthStart : weekStart)
+      .eq('congregation_id', user.congregation_id)
       .neq('status', 'cancelled')
+
+    if (mode === 'monthly') {
+      myCountQuery = myCountQuery
+        .gte('week_start', monthStart)
+        .lt('week_start', monthEnd)
+    } else {
+      myCountQuery = myCountQuery.eq('week_start', activeWeekStart)
+    }
+
+    const { count: myCount } = await myCountQuery
     setMyCurrentCount(myCount ?? 0)
 
     const limits = mode === 'monthly' ? MONTHLY_LIMITS : WEEKLY_LIMITS
@@ -84,14 +96,18 @@ export default function ReliefBadge() {
       : ((config?.relief_limit_publicador as number | null | undefined) ?? 1)
     setReliefMonthlyLimit(reliefLim)
 
-    const thisMonthStart = new Date(new Date().getFullYear(), new Date().getMonth(), 1)
+    const thisMonthStart = new Date(activeWeekDate.getFullYear(), activeWeekDate.getMonth(), 1)
+      .toISOString().split('T')[0]
+    const thisMonthEnd = new Date(activeWeekDate.getFullYear(), activeWeekDate.getMonth() + 1, 1)
       .toISOString().split('T')[0]
     const { count: acceptedCount } = await supabase
       .from('relief_requests')
       .select('id', { count: 'exact', head: true })
       .eq('acceptor_id', user.id)
+      .eq('congregation_id', user.congregation_id)
       .eq('status', 'accepted')
       .gte('accepted_at', thisMonthStart)
+      .lt('accepted_at', thisMonthEnd)
     setMyMonthlyReliefCount(acceptedCount ?? 0)
 
     // Cargar solicitudes de relevo
@@ -103,6 +119,7 @@ export default function ReliefBadge() {
         slot:time_slots!relief_requests_slot_id_fkey(id, day_of_week, start_time, end_time)
       `)
       .neq('from_user_id', user.id)   // No mis propias solicitudes
+      .eq('congregation_id', user.congregation_id)
       .eq('status', 'pending')
       .gt('expires_at', nowIso)
 
@@ -121,25 +138,34 @@ export default function ReliefBadge() {
 
       if (openReliefs.length > 0) {
         const openSlotIds = [...new Set(openReliefs.map(r => r.slot_id))]
+        const openWeekStarts = [...new Set(openReliefs.map(r => r.week_start))]
 
-        // Obtener ocupantes actuales de esos slots en la semana activa
+        // Obtener ocupantes actuales de esos slots en sus semanas
         const { data: slotRes } = await supabase
           .from('reservations')
-          .select('time_slot_id, user_id, user:users!reservations_user_id_fkey(id, gender)')
+          .select('time_slot_id, week_start, user_id, user:users!reservations_user_id_fkey(id, gender)')
           .in('time_slot_id', openSlotIds)
-          .eq('week_start', weekStart)
+          .in('week_start', openWeekStarts)
+          .eq('congregation_id', user.congregation_id)
           .neq('status', 'cancelled')
 
         type OccupantInfo = { userId: string; gender: string | null }
-        const occupantsBySlot: Record<string, OccupantInfo[]> = {}
-        for (const r of (slotRes ?? []) as unknown as { time_slot_id: string; user_id: string; user: { id: string; gender: string } | null }[]) {
-          if (!occupantsBySlot[r.time_slot_id]) occupantsBySlot[r.time_slot_id] = []
-          occupantsBySlot[r.time_slot_id].push({ userId: r.user_id, gender: r.user?.gender ?? null })
+        const occupantsBySlotWeek: Record<string, OccupantInfo[]> = {}
+        for (const r of (slotRes ?? []) as unknown as {
+          time_slot_id: string
+          week_start: string
+          user_id: string
+          user: { id: string; gender: string } | null
+        }[]) {
+          const key = `${r.time_slot_id}|${r.week_start}`
+          if (!occupantsBySlotWeek[key]) occupantsBySlotWeek[key] = []
+          occupantsBySlotWeek[key].push({ userId: r.user_id, gender: r.user?.gender ?? null })
         }
 
         visibleOpen = openReliefs.filter(r => {
+          const key = `${r.slot_id}|${r.week_start}`
           const fromUserId = (r.from_user as { id: string } | undefined)?.id ?? r.from_user_id
-          const allOccupants = occupantsBySlot[r.slot_id] ?? []
+          const allOccupants = occupantsBySlotWeek[key] ?? []
           // Excluir al solicitante (su lugar es el que se va a cubrir)
           const remaining = allOccupants.filter(o => o.userId !== fromUserId)
 
@@ -155,7 +181,7 @@ export default function ReliefBadge() {
     }
     setLoading(false)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id, user?.gender, user?.user_type])
+  }, [user?.id, user?.gender, user?.user_type, user?.congregation_id])
 
   useEffect(() => { fetchReliefs() }, [fetchReliefs])
 

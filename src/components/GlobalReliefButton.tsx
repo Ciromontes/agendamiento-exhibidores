@@ -44,6 +44,14 @@ function buildSlotDatetime(weekStart: string, dayOfWeek: number, startTime: stri
   return d
 }
 
+const RELIEF_MAX_DURATION_MS = 24 * 3_600_000
+
+function buildReliefExpiry(slotDatetime: Date | null): string {
+  const maxExpiry = Date.now() + RELIEF_MAX_DURATION_MS
+  if (!slotDatetime) return new Date(maxExpiry).toISOString()
+  return new Date(Math.min(slotDatetime.getTime(), maxExpiry)).toISOString()
+}
+
 // Tipo interno para reservas con su info de slot
 type ReservationItem = {
   id: string
@@ -54,15 +62,16 @@ type ReservationItem = {
     end_time: string
   }
   hasPendingRelief: boolean   // Ya hay una solicitud pendiente para esta reserva
+  canRequestRelief: boolean   // Solo se permite para turnos futuros
 }
 
 export default function GlobalReliefButton() {
   const { user } = useUser()
   const supabase = createClient()
-  const weekStart = getCurrentWeekStart()
   const congregationId = user?.congregation_id ?? ''
 
   // ─── Estado principal ────────────────────────────────────
+  const [weekStart, setWeekStart] = useState(getCurrentWeekStart())
   const [reservations, setReservations] = useState<ReservationItem[]>([])
   const [loading, setLoading] = useState(true)
   const [showModal, setShowModal] = useState(false)
@@ -79,8 +88,16 @@ export default function GlobalReliefButton() {
   const fetchData = useCallback(async () => {
     if (!user) return
     setLoading(true)
+    const { data: config } = await supabase
+      .from('app_config')
+      .select('active_week_start')
+      .eq('congregation_id', congregationId)
+      .limit(1)
+      .single()
+    const effectiveWeekStart = (config?.active_week_start as string | null) ?? getCurrentWeekStart()
+    setWeekStart(effectiveWeekStart)
 
-    // Reservas activas de esta semana con detalle del slot
+    // Reservas activas de la semana ACTIVA con detalle del slot
     const { data: resData } = await supabase
       .from('reservations')
       .select(`
@@ -88,7 +105,8 @@ export default function GlobalReliefButton() {
         slot:time_slots!reservations_time_slot_id_fkey(day_of_week, start_time, end_time)
       `)
       .eq('user_id', user.id)
-      .eq('week_start', weekStart)
+      .eq('congregation_id', congregationId)
+      .eq('week_start', effectiveWeekStart)
       .neq('status', 'cancelled')
 
     if (!resData || resData.length === 0) {
@@ -105,20 +123,29 @@ export default function GlobalReliefButton() {
       .select('reservation_id')
       .in('reservation_id', reservationIds)
       .eq('from_user_id', user.id)
+      .eq('congregation_id', congregationId)
       .eq('status', 'pending')
       .gt('expires_at', nowIso)
 
     const pendingSet = new Set(reliefData?.map(r => r.reservation_id) ?? [])
 
-    const items: ReservationItem[] = (resData as unknown as ReservationItem[]).map(r => ({
-      ...r,
-      hasPendingRelief: pendingSet.has(r.id),
-    }))
+    const nowMs = Date.now()
+    const items: ReservationItem[] = (resData as unknown as ReservationItem[]).map(r => {
+      const slotDatetime = r.slot
+        ? buildSlotDatetime(effectiveWeekStart, r.slot.day_of_week, r.slot.start_time)
+        : null
+
+      return {
+        ...r,
+        hasPendingRelief: pendingSet.has(r.id),
+        canRequestRelief: !!slotDatetime && slotDatetime.getTime() > nowMs,
+      }
+    })
 
     setReservations(items)
     setLoading(false)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id, weekStart])
+  }, [user?.id, congregationId])
 
   useEffect(() => { fetchData() }, [fetchData])
 
@@ -144,19 +171,48 @@ export default function GlobalReliefButton() {
 
   // ─── Enviar solicitudes de relevo ─────────────────────────
   const handleConfirm = async () => {
-    if (!user || selected.size === 0) return
+    if (!user || selected.size === 0 || !weekStart) return
     setSending(true)
 
-    const selectedItems = reservations.filter(r => selected.has(r.id))
+    const selectedItems = reservations.filter(
+      r => selected.has(r.id) && r.canRequestRelief && !r.hasPendingRelief
+    )
 
-    const inserts = selectedItems.map(res => {
-      // Expiración = el menor entre: inicio del turno y ahora+2h
+    if (selectedItems.length === 0) {
+      setShowModal(false)
+      setSending(false)
+      await fetchData()
+      return
+    }
+
+    const nowIso = new Date().toISOString()
+    const selectedReservationIds = selectedItems.map(r => r.id)
+
+    const { data: existingPending } = await supabase
+      .from('relief_requests')
+      .select('reservation_id')
+      .in('reservation_id', selectedReservationIds)
+      .eq('from_user_id', user.id)
+      .eq('congregation_id', congregationId)
+      .eq('status', 'pending')
+      .gt('expires_at', nowIso)
+
+    const existingPendingSet = new Set((existingPending ?? []).map(r => r.reservation_id))
+    const itemsToInsert = selectedItems.filter(r => !existingPendingSet.has(r.id))
+
+    if (itemsToInsert.length === 0) {
+      setShowModal(false)
+      setSending(false)
+      await fetchData()
+      return
+    }
+
+    const inserts = itemsToInsert.map(res => {
+      // Expiración = el menor entre: inicio del turno y ahora+24h
       const slotDatetime = res.slot
         ? buildSlotDatetime(weekStart, res.slot.day_of_week, res.slot.start_time)
         : null
-      const expiresAt = slotDatetime
-        ? new Date(Math.min(slotDatetime.getTime(), Date.now() + 2 * 3_600_000)).toISOString()
-        : new Date(Date.now() + 2 * 3_600_000).toISOString()
+      const expiresAt = buildReliefExpiry(slotDatetime)
 
       return {
         reservation_id:  res.id,
@@ -175,8 +231,9 @@ export default function GlobalReliefButton() {
     if (error) {
       alert('Error al enviar solicitudes: ' + error.message)
     } else {
-      setSentCount(selected.size)
+      setSentCount(itemsToInsert.length)
       setStep('select')       // volver al paso inicial (el modal se cerrará)
+      setSelected(new Set())
       setShowModal(false)
       await fetchData()       // recargar para marcar los nuevos como pendientes
     }
@@ -187,9 +244,9 @@ export default function GlobalReliefButton() {
   if (!user || loading) return null
 
   // ─── Derivados de UI ─────────────────────────────────────
-  const totalReservations = reservations.length
-  const pendingCount      = reservations.filter(r => r.hasPendingRelief).length
-  const available         = reservations.filter(r => !r.hasPendingRelief)
+  const actionableReservations = reservations.filter(r => r.canRequestRelief)
+  const totalReservations = actionableReservations.length
+  const pendingCount      = actionableReservations.filter(r => r.hasPendingRelief).length
   const allHavePending    = totalReservations > 0 && pendingCount === totalReservations
 
   return (
@@ -210,7 +267,7 @@ export default function GlobalReliefButton() {
               {allHavePending
                 ? `${pendingCount} solicitud${pendingCount !== 1 ? 'es' : ''} de relevo activa${pendingCount !== 1 ? 's' : ''} — visible${pendingCount !== 1 ? 's' : ''} en la campana 🔔`
                 : totalReservations === 0
-                ? 'Reserva un turno primero para poder pedir relevo desde aquí.'
+                ? 'No tienes turnos futuros para pedir relevo desde aquí.'
                 : `Tienes ${totalReservations} turno${totalReservations !== 1 ? 's' : ''} esta semana${pendingCount > 0 ? ` · ${pendingCount} ya con relevo pendiente` : ''}`}
             </p>
           </div>
@@ -269,7 +326,13 @@ export default function GlobalReliefButton() {
 
                   {/* Lista de reservas con checkboxes */}
                   <div className="space-y-2 mb-4">
-                    {reservations.map(res => {
+                    {actionableReservations.length === 0 && (
+                      <div className="rounded-xl border border-gray-200 bg-gray-50 px-3 py-3 text-xs text-gray-500">
+                        No hay turnos futuros disponibles para solicitar relevo.
+                      </div>
+                    )}
+
+                    {actionableReservations.map(res => {
                       const isChecked  = selected.has(res.id)
                       const isPending  = res.hasPendingRelief
                       const dayLabel   = res.slot ? DAYS_OF_WEEK[res.slot.day_of_week] : '—'
@@ -340,7 +403,7 @@ export default function GlobalReliefButton() {
                   {/* Resumen de los turnos seleccionados */}
                   <ul className="space-y-1 text-xs text-gray-600 bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4">
                     {reservations
-                      .filter(r => selected.has(r.id))
+                      .filter(r => selected.has(r.id) && r.canRequestRelief)
                       .map(res => (
                         <li key={res.id} className="flex items-center gap-1.5">
                           <span className="text-amber-500">🔄</span>

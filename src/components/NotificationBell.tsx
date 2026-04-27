@@ -40,6 +40,7 @@ export default function NotificationBell({ onBellClick }: Props) {
       .from('invitations')
       .select('id', { count: 'exact', head: true })
       .eq('to_user_id', user.id)
+      .eq('congregation_id', user.congregation_id)
       .eq('status', 'pending')
       .gt('expires_at', nowIso)
     setInvitationCount(invCount ?? 0)
@@ -47,22 +48,65 @@ export default function NotificationBell({ onBellClick }: Props) {
     // Relevos pendientes: dirigidos a mí o abiertos (no enviados por mí)
     const { data: reliefData } = await supabase
       .from('relief_requests')
-      .select('id, to_user_id, from_user:users!relief_requests_from_user_id_fkey(gender)')
+      .select('id, slot_id, week_start, to_user_id, from_user_id')
       .neq('from_user_id', user.id)
+      .eq('congregation_id', user.congregation_id)
       .eq('status', 'pending')
       .gt('expires_at', nowIso)
 
-    // Filtrar: dirigidos a mí O abiertos con género compatible
-    const relevant = (reliefData ?? []).filter(r => {
-      if (r.to_user_id === user.id) return true  // Personalizado para mí
-      if (r.to_user_id !== null) return false    // Personalizado para otro
-      // Abierto: verificar compatibilidad de género
-      const fromGender = (r.from_user as unknown as { gender: string } | undefined)?.gender
-      return fromGender === user.gender
-    })
-    setReliefCount(relevant.length)
+    type ReliefLite = {
+      id: string
+      slot_id: string
+      week_start: string
+      to_user_id: string | null
+      from_user_id: string
+    }
+    const allReliefs = (reliefData ?? []) as ReliefLite[]
+    const personalReliefs = allReliefs.filter(r => r.to_user_id === user.id)
+    const openReliefs = allReliefs.filter(r => r.to_user_id === null)
+
+    // Para relevos abiertos, validar compatibilidad por ocupantes actuales del slot
+    // (igual que ReliefBadge), no por género del solicitante.
+    let visibleOpen = openReliefs
+    if (openReliefs.length > 0) {
+      const slotIds = [...new Set(openReliefs.map(r => r.slot_id))]
+      const weekStarts = [...new Set(openReliefs.map(r => r.week_start))]
+      const { data: slotRes } = await supabase
+        .from('reservations')
+        .select('time_slot_id, week_start, user_id, user:users!reservations_user_id_fkey(id, gender)')
+        .in('time_slot_id', slotIds)
+        .in('week_start', weekStarts)
+        .eq('congregation_id', user.congregation_id)
+        .neq('status', 'cancelled')
+
+      type OccupantInfo = { userId: string; gender: string | null }
+      const occupantsBySlotWeek: Record<string, OccupantInfo[]> = {}
+      for (const row of (slotRes ?? []) as unknown as {
+        time_slot_id: string
+        week_start: string
+        user_id: string
+        user: { id: string; gender: string | null } | null
+      }[]) {
+        const key = `${row.time_slot_id}|${row.week_start}`
+        if (!occupantsBySlotWeek[key]) occupantsBySlotWeek[key] = []
+        occupantsBySlotWeek[key].push({ userId: row.user_id, gender: row.user?.gender ?? null })
+      }
+
+      visibleOpen = openReliefs.filter(r => {
+        const key = `${r.slot_id}|${r.week_start}`
+        const occupants = occupantsBySlotWeek[key] ?? []
+        const remaining = occupants.filter(o => o.userId !== r.from_user_id)
+
+        if (remaining.length === 0) return true
+        if (!user.gender) return true
+
+        return remaining.every(o => !o.gender || o.gender === user.gender)
+      })
+    }
+
+    setReliefCount(personalReliefs.length + visibleOpen.length)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id, user?.gender])
+  }, [user?.id, user?.gender, user?.congregation_id])
 
   useEffect(() => { fetchCounts() }, [fetchCounts])
 

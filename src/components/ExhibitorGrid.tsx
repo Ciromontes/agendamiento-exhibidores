@@ -90,6 +90,14 @@ function getSlotDatetime(weekStart: string, dayOfWeek: number, startTime: string
   return d
 }
 
+const RELIEF_MAX_DURATION_MS = 24 * 3_600_000
+
+function buildReliefExpiry(slotDatetime: Date | null): string {
+  const maxExpiry = Date.now() + RELIEF_MAX_DURATION_MS
+  if (!slotDatetime) return new Date(maxExpiry).toISOString()
+  return new Date(Math.min(slotDatetime.getTime(), maxExpiry)).toISOString()
+}
+
 function getDisplayBlockReason(reason: string | null | undefined): string {
   const raw = String(reason ?? '').trim()
   if (!raw) return 'No Disponible'
@@ -366,24 +374,80 @@ export default function ExhibitorGrid() {
         accInvData as { slot_id: string; from_user_id: string; to_user_id: string }[]
       )
 
-      // Relevos abiertos de otros usuarios esta semana, del mismo género
-      // Feature 2: también cargamos id + name del solicitante
+      // Relevos abiertos de otros usuarios esta semana.
+      // Se muestran solo cuando el usuario actual puede convivir con
+      // el ocupante que queda en ese slot (si existe).
       const { data: openRelData } = await supabase
         .from('relief_requests')
-        .select('id, slot_id, from_user:users!relief_requests_from_user_id_fkey(id, name, gender)')
+        .select('id, slot_id, week_start, from_user_id, from_user:users!relief_requests_from_user_id_fkey(id, name)')
         .neq('from_user_id', user.id)
+        .eq('congregation_id', congregationId)
         .eq('week_start', weekStart)
         .eq('status', 'pending')
         .is('to_user_id', null)
         .gt('expires_at', nowIso)
+
       if (openRelData) {
+        const openReliefs = openRelData as unknown as {
+          id: string
+          slot_id: string
+          week_start: string
+          from_user_id: string
+          from_user: { id: string; name: string } | null
+        }[]
+
+        let visibleOpen = openReliefs
+
+        if (openReliefs.length > 0) {
+          const openSlotIds = [...new Set(openReliefs.map(r => r.slot_id))]
+          const openWeekStarts = [...new Set(openReliefs.map(r => r.week_start))]
+
+          const { data: slotRes } = await supabase
+            .from('reservations')
+            .select('time_slot_id, week_start, user_id, user:users!reservations_user_id_fkey(id, gender)')
+            .in('time_slot_id', openSlotIds)
+            .in('week_start', openWeekStarts)
+            .eq('congregation_id', congregationId)
+            .neq('status', 'cancelled')
+
+          type OccupantInfo = { userId: string; gender: string | null }
+          const occupantsBySlotWeek: Record<string, OccupantInfo[]> = {}
+
+          for (const row of (slotRes ?? []) as unknown as {
+            time_slot_id: string
+            week_start: string
+            user_id: string
+            user: { id: string; gender: string | null } | null
+          }[]) {
+            const key = `${row.time_slot_id}|${row.week_start}`
+            if (!occupantsBySlotWeek[key]) occupantsBySlotWeek[key] = []
+            occupantsBySlotWeek[key].push({ userId: row.user_id, gender: row.user?.gender ?? null })
+          }
+
+          visibleOpen = openReliefs.filter(rel => {
+            const key = `${rel.slot_id}|${rel.week_start}`
+            const occupants = occupantsBySlotWeek[key] ?? []
+            const remaining = occupants.filter(o => o.userId !== rel.from_user_id)
+
+            if (remaining.length === 0) return true
+            if (!user.gender) return true
+
+            return remaining.every(o => !o.gender || o.gender === user.gender)
+          })
+        }
+
         const map: Record<string, { id: string; from_user_id: string; name: string }> = {}
-        for (const r of openRelData as unknown as { id: string; slot_id: string; from_user: { id: string; name: string; gender: string } | null }[]) {
-          if (r.from_user?.gender === user.gender) {
-            map[r.slot_id] = { id: r.id, from_user_id: r.from_user.id, name: r.from_user.name }
+        for (const rel of visibleOpen) {
+          if (!rel.from_user) continue
+          map[rel.slot_id] = {
+            id: rel.id,
+            from_user_id: rel.from_user.id,
+            name: rel.from_user.name,
           }
         }
         setOpenReliefBySlot(map)
+      } else {
+        setOpenReliefBySlot({})
       }
     }
 
@@ -796,6 +860,8 @@ export default function ExhibitorGrid() {
    *   • Personal → elige un compañero específico
    */
   const handleOpenReliefModal = async (reservation: Reservation) => {
+    if (!user) return
+
     const slot = timeSlots.find(s => s.id === reservation.time_slot_id)
     if (!slot) return
     const slotDatetime = getSlotDatetime(weekStart, slot.day_of_week, slot.start_time)
@@ -808,15 +874,39 @@ export default function ExhibitorGrid() {
       return
     }
 
-    // Cargar usuarios disponibles del mismo género para relevo personal
-    const { data } = await supabase
+    // Cargar usuarios disponibles para relevo personal
+    let query = supabase
       .from('users')
       .select('id, name, user_type')
       .eq('is_active', true)
-      .eq('gender', user?.gender ?? 'M')
-      .neq('id', user?.id)
+      .eq('is_admin', false)
+      .eq('congregation_id', congregationId)
+      .neq('id', user.id)
       .order('name')
-    setReliefUsers((data ?? []) as Pick<User, 'id' | 'name' | 'user_type'>[])
+
+    if (user.gender) {
+      query = query.eq('gender', user.gender)
+    }
+
+    const { data } = await query
+
+    const candidates = (data ?? []) as Pick<User, 'id' | 'name' | 'user_type'>[]
+    const reservationCountByUser = new Map<string, number>()
+
+    for (const res of countSource) {
+      reservationCountByUser.set(
+        res.user_id,
+        (reservationCountByUser.get(res.user_id) ?? 0) + 1
+      )
+    }
+
+    const eligibleCandidates = candidates.filter(candidate => {
+      const currentCount = reservationCountByUser.get(candidate.id) ?? 0
+      const maxForCandidate = limitsTable[candidate.user_type] ?? 1
+      return currentCount < maxForCandidate
+    })
+
+    setReliefUsers(eligibleCandidates)
     setReliefModal({ reservationId: reservation.id, slotId: reservation.time_slot_id, isUrgent: false })
     setReliefType('open')
     setReliefPersonalId(null)
@@ -828,8 +918,8 @@ export default function ExhibitorGrid() {
    * type 'open'     → to_user_id = null  (cualquiera del mismo género)
    * type 'personal' → to_user_id = UUID  (usuario específico)
    *
-   * expires_at = mínimo entre: inicio del turno y ahora+2h.
-   * (si el turno es en 30 min, expira en 30 min; si es mañana, expira en 2h)
+   * expires_at = mínimo entre: inicio del turno y ahora+24h.
+   * (si el turno es en 30 min, expira en 30 min; si es mañana, expira en 24h)
    */
   const handleSendRelief = async (
     reservationId: string,
@@ -838,14 +928,39 @@ export default function ExhibitorGrid() {
     toUserId: string | null,
   ) => {
     if (!user) return
+    if (type === 'personal' && !toUserId) return
+
     setReliefSending(true)
+
+    const nowIso = new Date().toISOString()
+    const { data: existingPending } = await supabase
+      .from('relief_requests')
+      .select('id')
+      .eq('reservation_id', reservationId)
+      .eq('from_user_id', user.id)
+      .eq('congregation_id', user.congregation_id)
+      .eq('status', 'pending')
+      .gt('expires_at', nowIso)
+      .limit(1)
+
+    if (existingPending && existingPending.length > 0) {
+      setMyPendingReliefs(prev => (
+        prev.some(r => r.reservation_id === reservationId)
+          ? prev
+          : [...prev, { id: existingPending[0].id, reservation_id: reservationId, slot_id: slotId }]
+      ))
+      alert('Ya existe una solicitud de relevo pendiente para este turno.')
+      setReliefSending(false)
+      setReliefModal(null)
+      await loadData()
+      return
+    }
+
     const slot = timeSlots.find(s => s.id === slotId)
     const slotDatetime = slot
       ? getSlotDatetime(weekStart, slot.day_of_week, slot.start_time)
       : null
-    const expiresAt = slotDatetime
-      ? new Date(Math.min(slotDatetime.getTime(), Date.now() + 2 * 3_600_000)).toISOString()
-      : new Date(Date.now() + 2 * 3_600_000).toISOString()
+    const expiresAt = buildReliefExpiry(slotDatetime)
 
     const { error } = await supabase.from('relief_requests').insert({
       reservation_id:  reservationId,
@@ -873,6 +988,27 @@ export default function ExhibitorGrid() {
     }
     setReliefSending(false)
     setReliefModal(null)
+  }
+
+  const handleAcceptOpenRelief = async (reliefId: string) => {
+    if (!user) return
+
+    setActionLoading(reliefId)
+
+    const { data, error } = await supabase.rpc('accept_relief', {
+      p_relief_id: reliefId,
+      p_acceptor_id: user.id,
+    })
+
+    if (error || !data?.success) {
+      alert('No se pudo tomar el relevo: ' + (data?.error ?? error?.message ?? 'Error desconocido'))
+    } else {
+      alert('✅ Relevo aceptado. El turno fue transferido a tu nombre.')
+      await loadData()
+      await loadMonthlyReservations()
+    }
+
+    setActionLoading(null)
   }
 
   /**
@@ -1454,12 +1590,19 @@ export default function ExhibitorGrid() {
                                   )
                                 }
                                 // Si el ocupante tiene relevo abierto, mostrar indicador
-                                // Feature 2: mostrar nombre del que pide relevo
+                                // Feature 2: permitir tomar relevo directamente
                                 if (openReliefBySlot[slot.id]) {
+                                  const relief = openReliefBySlot[slot.id]
+                                  const isTakingRelief = actionLoading === relief.id
+
                                   return (
-                                    <span className="text-[10px] text-orange-600 font-medium">
-                                      🔄 {openReliefBySlot[slot.id].name} pide relevo
-                                    </span>
+                                    <button
+                                      onClick={() => handleAcceptOpenRelief(relief.id)}
+                                      disabled={isTakingRelief}
+                                      className="w-full py-1 text-[10px] rounded bg-orange-100 text-orange-700 hover:bg-orange-200 disabled:opacity-50 transition"
+                                    >
+                                      {isTakingRelief ? '...' : `🔄 Tomar relevo de ${relief.name}`}
+                                    </button>
                                   )
                                 }
                                 return (
@@ -1646,6 +1789,23 @@ export default function ExhibitorGrid() {
                           <p className="text-[10px] text-orange-600 font-semibold mt-0.5">
                             🔄 {openReliefBySlot[slot.id].name} pide relevo
                           </p>
+                        )}
+                        {hasOpenRelief && (
+                          <>
+                            {canReserve ? (
+                              <button
+                                onClick={() => handleAcceptOpenRelief(openReliefBySlot[slot.id].id)}
+                                disabled={actionLoading === openReliefBySlot[slot.id].id}
+                                className="w-full mt-1 py-1 text-[10px] rounded bg-orange-100 text-orange-700 hover:bg-orange-200 disabled:opacity-50 transition"
+                              >
+                                {actionLoading === openReliefBySlot[slot.id].id ? '...' : '✅ Tomar relevo'}
+                              </button>
+                            ) : (
+                              <p className="text-[10px] text-gray-500 mt-0.5">
+                                Sin cupo para tomar relevo.
+                              </p>
+                            )}
+                          </>
                         )}
                         {/* Indicador completo */}
                         <p className="text-[10px] text-green-600 font-bold mt-0.5">2/2 ✓</p>
