@@ -689,19 +689,31 @@ export async function POST(req: NextRequest) {
     }
 
     const currentBlocked = !slot.is_active
-    const effectiveBlocked = blockedInstruction.value === null ? currentBlocked : blockedInstruction.value
+    let effectiveBlocked = blockedInstruction.value === null ? currentBlocked : blockedInstruction.value
 
-    if (blockedInstruction.value !== null) {
-      if (blockedInstruction.value) {
-        const reasonToSave = blockReasonRaw || slot.block_reason || 'No Disponible'
-        slotUpdates.set(slot.id, { is_active: false, block_reason: reasonToSave })
-      } else {
+    // REGLA: Si hay publicadores asignados en el Excel, se fuerza el DESBLOQUEO automático
+    // para este horario mandando el Excel siempre.
+    if (userRaw || companionRaw) {
+      effectiveBlocked = false
+      if (currentBlocked || blockedInstruction.value) {
         slotUpdates.set(slot.id, { is_active: true, block_reason: null })
+      }
+    } else {
+      // Si no vienen publicadores, evaluamos la instrucción de bloqueo explícita si la hay
+      if (blockedInstruction.value !== null) {
+        if (blockedInstruction.value) {
+          const reasonToSave = blockReasonRaw || slot.block_reason || 'No Disponible'
+          slotUpdates.set(slot.id, { is_active: false, block_reason: reasonToSave })
+        } else {
+          slotUpdates.set(slot.id, { is_active: true, block_reason: null })
+        }
       }
     }
 
     if (!userRaw && !companionRaw) {
-      skipped++
+      if (!slotUpdates.has(slot.id)) {
+        skipped++
+      }
       continue
     }
 
