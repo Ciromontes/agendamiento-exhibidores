@@ -16,7 +16,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { verifyAdmin } from '@/lib/supabase/admin-auth'
 import { createServiceClient } from '@/lib/supabase/service'
 
-type WeekActionMode = 'reset_current' | 'advance_blank' | 'advance_keep' | 'advance_only'
+type WeekActionMode = 'reset_current' | 'advance_blank' | 'advance_keep' | 'advance_only' | 'rollback_only' | 'rollback_blank'
 
 function addDays(dateStr: string, days: number): string {
   const d = new Date(dateStr + 'T12:00:00')
@@ -38,7 +38,9 @@ function isWeekActionMode(value: unknown): value is WeekActionMode {
     value === 'reset_current' ||
     value === 'advance_blank' ||
     value === 'advance_keep' ||
-    value === 'advance_only'
+    value === 'advance_only' ||
+    value === 'rollback_only' ||
+    value === 'rollback_blank'
   )
 }
 
@@ -205,6 +207,85 @@ export async function POST(req: NextRequest) {
       mode: body.mode,
       active_week_start: targetWeek,
       message: 'Semana avanzada a la próxima semana calendario sin modificar reservas existentes.',
+    })
+  }
+
+  const rollbackWeek = addDays(currentWeek, -7)
+
+  if (body.mode === 'rollback_only') {
+    const { error: cfgUpdateError } = await supabase
+      .from('app_config')
+      .update({ active_week_start: rollbackWeek })
+      .eq('id', cfg.id)
+      .eq('congregation_id', admin.congregation_id)
+
+    if (cfgUpdateError) {
+      return NextResponse.json(
+        { error: 'No se pudo retroceder la semana: ' + cfgUpdateError.message },
+        { status: 500 },
+      )
+    }
+
+    return NextResponse.json({
+      ok: true,
+      mode: body.mode,
+      active_week_start: rollbackWeek,
+      message: 'Semana retrocedida a la semana anterior sin modificar reservas existentes.',
+    })
+  }
+
+  if (body.mode === 'rollback_blank') {
+    const [
+      { error: reservationsError },
+      { error: invitationsError },
+      { error: reliefError },
+      { error: absencesError },
+      { error: cfgUpdateError },
+    ] = await Promise.all([
+      supabase
+        .from('reservations')
+        .update({ status: 'cancelled' })
+        .eq('congregation_id', admin.congregation_id)
+        .eq('week_start', rollbackWeek)
+        .neq('status', 'cancelled'),
+      supabase
+        .from('invitations')
+        .update({ status: 'declined' })
+        .eq('congregation_id', admin.congregation_id)
+        .eq('week_start', rollbackWeek)
+        .eq('status', 'pending'),
+      supabase
+        .from('relief_requests')
+        .update({ status: 'cancelled' })
+        .eq('congregation_id', admin.congregation_id)
+        .eq('week_start', rollbackWeek)
+        .eq('status', 'pending'),
+      supabase
+        .from('absences')
+        .delete()
+        .eq('congregation_id', admin.congregation_id)
+        .eq('week_start', rollbackWeek),
+      supabase
+        .from('app_config')
+        .update({ active_week_start: rollbackWeek })
+        .eq('id', cfg.id)
+        .eq('congregation_id', admin.congregation_id),
+    ])
+
+    if (reservationsError || invitationsError || reliefError || absencesError || cfgUpdateError) {
+      return NextResponse.json(
+        {
+          error: 'No se pudo retroceder la semana en blanco.',
+        },
+        { status: 500 },
+      )
+    }
+
+    return NextResponse.json({
+      ok: true,
+      mode: body.mode,
+      active_week_start: rollbackWeek,
+      message: 'Semana retrocedida en blanco. Se limpiaron las reservas de la semana destino.',
     })
   }
 

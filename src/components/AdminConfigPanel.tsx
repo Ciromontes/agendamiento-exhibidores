@@ -45,7 +45,7 @@ type ConfigData = {
   last_week_compensation: boolean
 }
 
-type WeekActionMode = 'reset_current' | 'advance_blank' | 'advance_keep' | 'advance_only'
+type WeekActionMode = 'reset_current' | 'advance_blank' | 'advance_keep' | 'advance_only' | 'rollback_only' | 'rollback_blank'
 
 export default function AdminConfigPanel() {
   // ─── Estado ────────────────────────────────────────────────
@@ -107,6 +107,8 @@ export default function AdminConfigPanel() {
       advance_blank: 'abrir la nueva semana en blanco (sin reservas)',
       advance_keep: 'abrir la nueva semana manteniendo los cupos actuales',
       advance_only: 'abrir la siguiente semana sin modificar las reservas ya cargadas',
+      rollback_only: 'retroceder a la semana anterior sin tocar los cupos',
+      rollback_blank: 'retroceder a la semana anterior borrando los datos de reservas',
     }
 
     const ok = window.confirm(
@@ -115,8 +117,9 @@ export default function AdminConfigPanel() {
     )
     if (!ok) return
 
-    const securityWord = window.prompt('Escribe REINICIAR para confirmar')
-    if ((securityWord ?? '').trim().toUpperCase() !== 'REINICIAR') {
+    const expectedWord = mode.startsWith('rollback') ? 'RETROCEDER' : 'REINICIAR'
+    const securityWord = window.prompt(`Escribe ${expectedWord} para confirmar`)
+    if ((securityWord ?? '').trim().toUpperCase() !== expectedWord) {
       alert('Confirmación inválida. Operación cancelada.')
       return
     }
@@ -444,6 +447,35 @@ export default function AdminConfigPanel() {
             </p>
             <p className="text-[11px] text-emerald-600 mt-2">
               {weekActionLoading === 'advance_keep' ? 'Procesando...' : '⚠️ Pide confirmación de seguridad'}
+            </p>
+          </button>
+          
+          {/* Botones de retroceder */}
+          <button
+            onClick={() => handleWeekQuickAction('rollback_only')}
+            disabled={weekActionLoading !== null}
+            className="text-left rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 hover:bg-blue-100 transition disabled:opacity-60"
+          >
+            <p className="text-sm font-bold text-blue-800">Retroceder semana (sin tocar cupos)</p>
+            <p className="text-xs text-blue-700 mt-1">
+              Regresa la configuración a la semana anterior respetando las reservas.
+            </p>
+            <p className="text-[11px] text-blue-600 mt-2">
+              {weekActionLoading === 'rollback_only' ? 'Procesando...' : '⚠️ Pide confirmación de seguridad'}
+            </p>
+          </button>
+
+          <button
+            onClick={() => handleWeekQuickAction('rollback_blank')}
+            disabled={weekActionLoading !== null}
+            className="text-left rounded-xl border border-orange-200 bg-orange-50 px-4 py-3 hover:bg-orange-100 transition disabled:opacity-60"
+          >
+            <p className="text-sm font-bold text-orange-800">Retroceder semana verificando limpieza</p>
+            <p className="text-xs text-orange-700 mt-1">
+              Regresa a la semana anterior y borra los datos de reservas vigentes de esa fecha destino.
+            </p>
+            <p className="text-[11px] text-orange-600 mt-2">
+              {weekActionLoading === 'rollback_blank' ? 'Procesando...' : '⚠️ Pide confirmación de seguridad'}
             </p>
           </button>
         </div>
