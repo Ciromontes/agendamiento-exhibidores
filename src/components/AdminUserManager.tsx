@@ -106,7 +106,7 @@ export default function AdminUserManager() {
   // =============================================================
   // Cargar usuarios desde Supabase
   // =============================================================
-  const fetchUsers = useCallback(async () => {
+  const loadUsers = useCallback(async () => {
     setLoading(true)
     try {
       const res = await fetch('/api/admin/users', {
@@ -122,12 +122,13 @@ export default function AdminUserManager() {
       setErrorMsg('Error al conectar con el servidor.')
     }
     setLoading(false)
-  }, [currentAdmin?.access_key])
+  }, [currentAdmin])
 
   // Cargar usuarios al montar el componente
   useEffect(() => {
-    fetchUsers()
-  }, [fetchUsers])
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadUsers()
+  }, [loadUsers])
 
   // Auto-limpiar mensajes después de 4 segundos
   useEffect(() => {
@@ -321,7 +322,7 @@ export default function AdminUserManager() {
     // Refrescar lista y cerrar modal
     setSaving(false)
     closeModal()
-    await fetchUsers()
+    await loadUsers()
   }
 
   // =============================================================
@@ -360,7 +361,7 @@ export default function AdminUserManager() {
     setSavingSpouse(false)
     setShowSpouseModal(false)
     setSpouseTargetUser(null)
-    await fetchUsers()
+    await loadUsers()
   }
 
   // =============================================================
@@ -382,7 +383,7 @@ export default function AdminUserManager() {
       setSuccessMsg(`${targetUser.name} y ${spouseName} desvinculados.`)
     }
 
-    await fetchUsers()
+    await loadUsers()
   }
 
   // Helper: obtener nombre del cónyuge desde la lista de usuarios
@@ -441,7 +442,7 @@ export default function AdminUserManager() {
     // Guardar en memoria para poder mostrarla y usarla en WhatsApp
     setGeneratedKeys(prev => new Map(prev).set(targetUser.id, key))
     setSuccessMsg(`Nueva clave generada para "${targetUser.name}".`)
-    await fetchUsers()
+    await loadUsers()
   }
 
   /**
@@ -530,7 +531,7 @@ export default function AdminUserManager() {
     })
     setBulkQueue(queue.sort((a, b) => a.user.name.localeCompare(b.user.name)))
     setBulkStep('sending')
-    await fetchUsers()
+    await loadUsers()
   }
 
   /** Abre WhatsApp con el mensaje pre-escrito y copia al portapapeles como respaldo */
@@ -619,7 +620,7 @@ export default function AdminUserManager() {
         const labels = { deactivate: 'desactivados', activate: 'activados', delete: 'eliminados' }
         setSuccessMsg(`${json.affected} usuario(s) ${labels[action]}.`)
         clearSelection()
-        await fetchUsers()
+        await loadUsers()
       }
     } catch {
       setErrorMsg('Error de conexión al ejecutar acción masiva.')
@@ -653,7 +654,7 @@ export default function AdminUserManager() {
         setErrorMsg(json.error ?? 'Error al eliminar usuario.')
       } else {
         setSuccessMsg(`Usuario "${targetUser.name}" eliminado permanentemente.`)
-        await fetchUsers()
+        await loadUsers()
       }
     } catch {
       setErrorMsg('Error de conexión al eliminar.')
@@ -688,7 +689,7 @@ export default function AdminUserManager() {
 
     const action = newStatus ? 'activado' : 'desactivado'
     setSuccessMsg(`Usuario "${targetUser.name}" ${action}.`)
-    await fetchUsers()
+    await loadUsers()
   }
 
   // =============================================================
@@ -1566,3 +1567,4 @@ export default function AdminUserManager() {
     </div>
   )
 }
+

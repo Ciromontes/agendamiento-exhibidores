@@ -1,0 +1,50 @@
+
+> exhibidores-app@0.1.0 lint
+> eslint
+
+
+D:\Teocr├íticos\Proyectos\ExhibidoresAgendamiento\exhibidores-app\load-tests\cleanup-by-weeks.js
+   3:14  error  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+   4:14  error  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+  26:26  error  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+
+D:\Teocr├íticos\Proyectos\ExhibidoresAgendamiento\exhibidores-app\load-tests\load-test.js
+  104:1   warning  Unexpected default export of anonymous function  import/no-anonymous-default-export
+  213:16  warning  '_' is defined but never used                    @typescript-eslint/no-unused-vars
+
+D:\Teocr├íticos\Proyectos\ExhibidoresAgendamiento\exhibidores-app\load-tests\multi-congregation-test.js
+  120:1  warning  Unexpected default export of anonymous function  import/no-anonymous-default-export
+
+D:\Teocr├íticos\Proyectos\ExhibidoresAgendamiento\exhibidores-app\load-tests\simulate-3-months.js
+  33:14  error  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+  34:14  error  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+  59:26  error  A `require()` style import is forbidden  @typescript-eslint/no-require-imports
+
+D:\Teocr├íticos\Proyectos\ExhibidoresAgendamiento\exhibidores-app\load-tests\soak-test.js
+  103:1  warning  Unexpected default export of anonymous function  import/no-anonymous-default-export
+
+D:\Teocr├íticos\Proyectos\ExhibidoresAgendamiento\exhibidores-app\load-tests\spike-test.js
+  95:1  warning  Unexpected default export of anonymous function  import/no-anonymous-default-export
+
+D:\Teocr├íticos\Proyectos\ExhibidoresAgendamiento\exhibidores-app\load-tests\stress-test.js
+   99:1   warning  Unexpected default export of anonymous function  import/no-anonymous-default-export
+  194:16  warning  '_' is defined but never used                    @typescript-eslint/no-unused-vars
+
+D:\Teocr├íticos\Proyectos\ExhibidoresAgendamiento\exhibidores-app\src\app\[slug]\admin\page.tsx
+  51:6  warning  React Hook useEffect has a missing dependency: 'logout'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+D:\Teocr├íticos\Proyectos\ExhibidoresAgendamiento\exhibidores-app\src\app\[slug]\dashboard\page.tsx
+  75:3  warning  Unused eslint-disable directive (no problems were reported from 'react-hooks/exhaustive-deps')
+
+D:\Teocr├íticos\Proyectos\ExhibidoresAgendamiento\exhibidores-app\src\app\api\auth\login\route.ts
+  125:27  warning  '_congregation' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+D:\Teocr├íticos\Proyectos\ExhibidoresAgendamiento\exhibidores-app\src\components\AdminUserManager.tsx
+  417:9  warning  'generateSecureKey' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+D:\Teocr├íticos\Proyectos\ExhibidoresAgendamiento\exhibidores-app\src\components\OpeningCountdown.tsx
+  146:9  warning  'baseTimeLeft' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+Ô£û 18 problems (6 errors, 12 warnings)
+  0 errors and 1 warning potentially fixable with the `--fix` option.
+

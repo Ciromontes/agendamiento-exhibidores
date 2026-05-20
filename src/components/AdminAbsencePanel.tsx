@@ -78,7 +78,7 @@ export default function AdminAbsencePanel() {
     const rows = data as unknown as AbsenceRow[]
     const userIds = rows.map(r => r.user_id)
 
-    let reliefCounts = new Map<string, number>()
+    const reliefCounts = new Map<string, number>()
     if (userIds.length > 0) {
       const { data: relData } = await supabase
         .from('relief_requests')
