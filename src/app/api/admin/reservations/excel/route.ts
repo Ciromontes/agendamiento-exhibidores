@@ -16,6 +16,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
 import { verifyAdmin } from '@/lib/supabase/admin-auth'
 import { createServiceClient } from '@/lib/supabase/service'
+import { hasTimeConflict, calculateEndTime } from '@/lib/slots/conflict-detection'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
@@ -45,6 +46,7 @@ type SlotLookupRow = {
   exhibitor_id: string
   day_of_week: number
   start_time: string
+  end_time?: string
   is_active: boolean
   block_reason: string | null
 }
@@ -66,6 +68,16 @@ type ImportAssignment = {
   status: 'confirmed'
   slot_position: number
   congregation_id: string
+}
+
+type SlotAction = {
+  rowNum: number
+  exhibitor_name: string
+  day: string
+  hour: string
+  action: 'CREADO' | 'EXISTENTE' | 'ERROR'
+  message?: string
+  slot_id?: string
 }
 
 const DAY_LABELS: Record<number, string> = {
@@ -526,7 +538,7 @@ export async function POST(req: NextRequest) {
 
   const { data: slots, error: slotError } = await supabase
     .from('time_slots')
-    .select('id, exhibitor_id, day_of_week, start_time, is_active, block_reason')
+    .select('id, exhibitor_id, day_of_week, start_time, end_time, is_active, block_reason')
     .eq('congregation_id', admin.congregation_id)
     .in('exhibitor_id', exhibitorIds)
 
@@ -561,9 +573,16 @@ export async function POST(req: NextRequest) {
   }
 
   const slotMap = new Map<string, SlotLookupRow>()
+  const slotsByExhibitorAndDay = new Map<string, SlotLookupRow[]>()
   for (const s of (slots ?? []) as SlotLookupRow[]) {
     const key = `${s.exhibitor_id}|${s.day_of_week}|${s.start_time}`
     slotMap.set(key, s)
+    
+    // Agrupar slots por exhibidor y día para detección de conflictos
+    const groupKey = `${s.exhibitor_id}|${s.day_of_week}`
+    const current = slotsByExhibitorAndDay.get(groupKey) ?? []
+    current.push(s)
+    slotsByExhibitorAndDay.set(groupKey, current)
   }
 
   const errors: string[] = []
@@ -571,6 +590,8 @@ export async function POST(req: NextRequest) {
   let skipped = 0
   const seenSlotRows = new Set<string>()
   const slotUpdates = new Map<string, { is_active: boolean; block_reason: string | null }>()
+  const slotActions: SlotAction[] = []
+  const slotsToCreate: Array<{ exhibitor_id: string; day_of_week: number; start_time: string; end_time: string; congregation_id: string }> = []
 
   const addCellError = (rowNum: number, column: string, detail: string) => {
     errors.push(`Fila ${rowNum}, columna "${column}": ${detail}`)
@@ -665,15 +686,77 @@ export async function POST(req: NextRequest) {
     if (!exhibitor) continue
 
     const slotKey = `${exhibitor.id}|${dayOfWeek}|${startTime}`
-    const slot = slotMap.get(slotKey)
+    let slot = slotMap.get(slotKey)
 
+    // Si el slot no existe, intentar crearlo automáticamente si no hay conflictos
     if (!slot) {
-      addCellError(
-        rowNum,
-        'hora',
-        `no existe slot para ${exhibitorRaw} (${String(dayRaw)} ${shortTime(startTime)}).`,
+      const endTime = calculateEndTime(startTime)
+      const groupKey = `${exhibitor.id}|${dayOfWeek}`
+      const existingSlotsForDay = slotsByExhibitorAndDay.get(groupKey) ?? []
+
+      // Detectar conflictos con slots existentes del mismo exhibidor en el mismo día
+      const conflictingSlot = existingSlotsForDay.find((s) =>
+        s.end_time && hasTimeConflict(startTime, endTime, s.start_time, s.end_time),
       )
-      continue
+
+      if (conflictingSlot) {
+        addCellError(
+          rowNum,
+          'hora',
+          `conflicto de horarios: ${shortTime(startTime)}-${shortTime(endTime)} se cruza con ${shortTime(conflictingSlot.start_time)}-${shortTime(conflictingSlot.end_time!)}.`,
+        )
+        slotActions.push({
+          rowNum,
+          exhibitor_name: exhibitorRaw,
+          day: String(dayRaw),
+          hour: shortTime(startTime),
+          action: 'ERROR',
+          message: `Conflicto con ${shortTime(conflictingSlot.start_time)}-${shortTime(conflictingSlot.end_time!)}`,
+        })
+        continue
+      }
+
+      // No hay conflicto → crear el slot
+      slotsToCreate.push({
+        exhibitor_id: exhibitor.id,
+        day_of_week: dayOfWeek,
+        start_time: startTime,
+        end_time: endTime,
+        congregation_id: admin.congregation_id,
+      })
+
+      slotActions.push({
+        rowNum,
+        exhibitor_name: exhibitorRaw,
+        day: String(dayRaw),
+        hour: shortTime(startTime),
+        action: 'CREADO',
+      })
+
+      // Agregar a las estructuras de datos locales para poder encontrarlo luego
+      const newSlotForLookup: SlotLookupRow = {
+        id: `temp-${slotKey}`, // ID temporal, se actualizará después de insertar
+        exhibitor_id: exhibitor.id,
+        day_of_week: dayOfWeek,
+        start_time: startTime,
+        is_active: true,
+        block_reason: null,
+      }
+      slotMap.set(slotKey, newSlotForLookup)
+      const currentGroup = slotsByExhibitorAndDay.get(groupKey) ?? []
+      currentGroup.push(newSlotForLookup)
+      slotsByExhibitorAndDay.set(groupKey, currentGroup)
+
+      slot = newSlotForLookup
+    } else {
+      slotActions.push({
+        rowNum,
+        exhibitor_name: exhibitorRaw,
+        day: String(dayRaw),
+        hour: shortTime(startTime),
+        action: 'EXISTENTE',
+        slot_id: slot.id,
+      })
     }
 
     if (seenSlotRows.has(slot.id)) {
@@ -782,6 +865,54 @@ export async function POST(req: NextRequest) {
   }
 
   let updated = 0
+  let createdSlots = 0
+
+  // Crear slots nuevos si es necesario
+  if (slotsToCreate.length > 0) {
+    const { error: createSlotsError, data: createdSlotsData } = await supabase
+      .from('time_slots')
+      .insert(slotsToCreate)
+      .select('id, exhibitor_id, day_of_week, start_time')
+
+    if (createSlotsError) {
+      return NextResponse.json(
+        { error: 'No se pudo crear los nuevos slots: ' + createSlotsError.message },
+        { status: 500 },
+      )
+    }
+
+    createdSlots = createdSlotsData?.length ?? 0
+
+    // Actualizar slot map con los IDs reales de los slots creados
+    if (createdSlotsData) {
+      for (const createdSlot of createdSlotsData) {
+        const key = `${createdSlot.exhibitor_id}|${createdSlot.day_of_week}|${createdSlot.start_time}`
+        const existing = slotMap.get(key)
+        if (existing && existing.id.startsWith('temp-')) {
+          // Reemplazar con ID real
+          slotMap.set(key, {
+            ...existing,
+            id: createdSlot.id,
+          })
+        }
+      }
+
+      // Actualizar assignments para usar los IDs reales
+      for (const assignment of assignments) {
+        const slot = Array.from(slotMap.values()).find((s) => s.id === assignment.time_slot_id)
+        if (!slot || slot.id.startsWith('temp-')) {
+          // Buscar por campo temp
+          for (const [, value] of slotMap.entries()) {
+            if (value.id.startsWith('temp-') && value.exhibitor_id === slot?.exhibitor_id) {
+              assignment.time_slot_id = value.id
+            }
+          }
+        }
+      }
+    }
+  }
+
+  // Actualizar bloqueos de slots existentes
   for (const [slotId, patch] of slotUpdates.entries()) {
     const { error: slotUpdateError } = await supabase
       .from('time_slots')
@@ -861,8 +992,10 @@ export async function POST(req: NextRequest) {
     created,
     updated,
     skipped,
+    createdSlots,
+    slotActions,
     errors: [],
-    message: `Reservas aplicadas correctamente para la semana ${targetWeek}.`,
+    message: `Reservas aplicadas correctamente para la semana ${targetWeek}. Nuevos slots creados: ${createdSlots}`,
     targetWeek,
   })
 }
