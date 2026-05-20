@@ -9,8 +9,7 @@
 -- SOLUCIÓN:
 --   1) Insertar reservation con congregation_id
 --   2) Filtrar conteos por congregation_id (multi-tenant)
---   3) Leer app_config por congregation_id
---   4) Soportar compensación de última semana si está habilitada
+--   3) Mantener validación de espacio en el slot
 -- ═══════════════════════════════════════════════════════════════
 
 CREATE OR REPLACE FUNCTION accept_invitation(p_invitation_id UUID)
@@ -23,15 +22,6 @@ DECLARE
   v_inv                     invitations%ROWTYPE;
   v_slot_count              INTEGER;
   v_position                INTEGER;
-  v_invitee_count           INTEGER;
-  v_invitee_type            TEXT;
-  v_counting_mode           TEXT;
-  v_last_week_compensation  BOOLEAN;
-  v_week_start_date         DATE;
-  v_month_start_date        DATE;
-  v_is_last_week_of_month   BOOLEAN;
-  v_use_monthly_limit       BOOLEAN;
-  v_max_turnos              INTEGER;
   v_congregation_id         UUID;
 BEGIN
   -- 1) Obtener invitación pendiente
@@ -66,71 +56,7 @@ BEGIN
       'error', 'La invitación ha expirado. El turno vuelve a estar disponible para todos.');
   END IF;
 
-  -- 4) Leer config y tipo de usuario en contexto multi-tenant
-  SELECT counting_mode, COALESCE(last_week_compensation, false)
-    INTO v_counting_mode, v_last_week_compensation
-    FROM app_config
-    WHERE congregation_id = v_congregation_id
-    LIMIT 1;
-
-  IF v_counting_mode IS NULL THEN
-    v_counting_mode := 'weekly';
-  END IF;
-
-  SELECT user_type INTO v_invitee_type
-    FROM users
-    WHERE id = v_inv.to_user_id;
-
-  v_week_start_date  := v_inv.week_start;
-  v_month_start_date := DATE_TRUNC('month', v_inv.week_start)::DATE;
-  v_is_last_week_of_month := DATE_TRUNC('month', (v_inv.week_start + INTERVAL '7 days'))
-                             <> DATE_TRUNC('month', v_inv.week_start);
-
-  v_use_monthly_limit :=
-    v_counting_mode = 'monthly'
-    OR (
-      v_counting_mode = 'weekly'
-      AND v_last_week_compensation
-      AND v_is_last_week_of_month
-    );
-
-  -- 5) Validar límite de turnos
-  IF v_use_monthly_limit THEN
-    SELECT COUNT(*) INTO v_invitee_count
-      FROM reservations
-      WHERE congregation_id = v_congregation_id
-        AND user_id    = v_inv.to_user_id
-        AND week_start >= v_month_start_date
-        AND status    != 'cancelled';
-
-    v_max_turnos := CASE v_invitee_type
-      WHEN 'publicador'         THEN 4
-      WHEN 'precursor_regular'  THEN 8
-      WHEN 'precursor_auxiliar' THEN 6
-      ELSE 1
-    END;
-  ELSE
-    SELECT COUNT(*) INTO v_invitee_count
-      FROM reservations
-      WHERE congregation_id = v_congregation_id
-        AND user_id    = v_inv.to_user_id
-        AND week_start = v_week_start_date
-        AND status    != 'cancelled';
-
-    v_max_turnos := CASE v_invitee_type
-      WHEN 'publicador'         THEN 1
-      WHEN 'precursor_regular'  THEN 2
-      WHEN 'precursor_auxiliar' THEN 2
-      ELSE 1
-    END;
-  END IF;
-
-  IF v_invitee_count >= v_max_turnos THEN
-    RETURN jsonb_build_object('success', false,
-      'error', 'Ya alcanzaste tu límite de turnos para este período.');
-  END IF;
-
-  -- 6) Verificar espacio en el slot
+  -- 4) Verificar espacio en el slot
   SELECT COUNT(*) INTO v_slot_count
     FROM reservations
     WHERE congregation_id = v_congregation_id
@@ -146,7 +72,7 @@ BEGIN
       'error', 'El turno ya no tiene espacio disponible.');
   END IF;
 
-  -- 7) Insertar reserva con congregation_id (fix principal)
+  -- 5) Insertar reserva con congregation_id (fix principal)
   v_position := v_slot_count + 1;
 
   INSERT INTO reservations (
@@ -165,12 +91,12 @@ BEGIN
     v_congregation_id
   );
 
-  -- 8) Marcar invitación como aceptada
+  -- 6) Marcar invitación como aceptada
   UPDATE invitations
     SET status = 'accepted'
     WHERE id = p_invitation_id;
 
-  -- 9) Si el slot quedó lleno, declinar otras pendientes del mismo slot
+  -- 7) Si el slot quedó lleno, declinar otras pendientes del mismo slot
   IF v_position = 2 THEN
     UPDATE invitations
       SET status = 'declined'

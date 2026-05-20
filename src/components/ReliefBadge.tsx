@@ -3,7 +3,7 @@
  * ─────────────────────────────────────────────────────────────
  * Muestra las solicitudes de relevo pendientes que recibió el usuario.
  * Incluye las dirigidas específicamente a él Y las abiertas cuyos
- * solicitantes son del mismo género y él no ha alcanzado su límite.
+ * solicitantes son del mismo género.
  *
  * Permite:
  *   • Aceptar → RPC accept_relief(relief_id, user.id)
@@ -19,7 +19,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useUser } from '@/context/UserContext'
-import { DAYS_OF_WEEK, formatTimeLabel, timeUntilExpiry, WEEKLY_LIMITS, MONTHLY_LIMITS } from '@/types'
+import { DAYS_OF_WEEK, formatTimeLabel, timeUntilExpiry } from '@/types'
 import type { ReliefRequest } from '@/types'
 
 export default function ReliefBadge() {
@@ -32,12 +32,6 @@ export default function ReliefBadge() {
   const [expanded,      setExpanded]      = useState(true)
   const [, setTick] = useState(0)
 
-  // Para saber si el usuario tiene cupo de turnos disponible
-  const [myCurrentCount, setMyCurrentCount] = useState(0)
-  const [maxTurnos,       setMaxTurnos]      = useState(1)
-  // Límite mensual de relevos aceptados (Step 3.1)
-  const [myMonthlyReliefCount, setMyMonthlyReliefCount] = useState(0)
-  const [reliefMonthlyLimit,   setReliefMonthlyLimit]   = useState(1)
   const panelRef = useRef<HTMLDivElement>(null)
 
   // ─── Cargar solicitudes pendientes ───────────────────────
@@ -45,70 +39,6 @@ export default function ReliefBadge() {
     if (!user) return
     setLoading(true)
     const nowIso = new Date().toISOString()
-
-    // Cargar modo de conteo y límites de relevos
-    const { data: config } = await supabase
-      .from('app_config')
-      .select('counting_mode, active_week_start, relief_limit_publicador, relief_limit_precursor')
-      .eq('congregation_id', user.congregation_id)
-      .limit(1)
-      .single()
-    const mode = config?.counting_mode ?? 'weekly'
-    const activeWeekStart = (config?.active_week_start as string | null) ?? (() => {
-      const now = new Date(); const day = now.getDay()
-      const diff = now.getDate() - day + (day === 0 ? -6 : 1)
-      const m = new Date(now.getFullYear(), now.getMonth(), diff)
-      return m.toISOString().split('T')[0]
-    })()
-
-    // Contar mis reservas actuales para saber si tengo cupo
-    const activeWeekDate = new Date(`${activeWeekStart}T12:00:00`)
-    const monthStart = new Date(activeWeekDate.getFullYear(), activeWeekDate.getMonth(), 1)
-      .toISOString().split('T')[0]
-    const monthEnd = new Date(activeWeekDate.getFullYear(), activeWeekDate.getMonth() + 1, 1)
-      .toISOString().split('T')[0]
-
-    let myCountQuery = supabase
-      .from('reservations')
-      .select('id', { count: 'exact', head: true })
-      .eq('user_id', user.id)
-      .eq('congregation_id', user.congregation_id)
-      .neq('status', 'cancelled')
-
-    if (mode === 'monthly') {
-      myCountQuery = myCountQuery
-        .gte('week_start', monthStart)
-        .lt('week_start', monthEnd)
-    } else {
-      myCountQuery = myCountQuery.eq('week_start', activeWeekStart)
-    }
-
-    const { count: myCount } = await myCountQuery
-    setMyCurrentCount(myCount ?? 0)
-
-    const limits = mode === 'monthly' ? MONTHLY_LIMITS : WEEKLY_LIMITS
-    setMaxTurnos(limits[user.user_type] ?? 1)
-
-    // Límite mensual de relevos aceptados (Step 3.1)
-    const isPrecursor = ['precursor_auxiliar', 'precursor_regular'].includes(user.user_type)
-    const reliefLim = isPrecursor
-      ? ((config?.relief_limit_precursor as number | null | undefined) ?? 2)
-      : ((config?.relief_limit_publicador as number | null | undefined) ?? 1)
-    setReliefMonthlyLimit(reliefLim)
-
-    const thisMonthStart = new Date(activeWeekDate.getFullYear(), activeWeekDate.getMonth(), 1)
-      .toISOString().split('T')[0]
-    const thisMonthEnd = new Date(activeWeekDate.getFullYear(), activeWeekDate.getMonth() + 1, 1)
-      .toISOString().split('T')[0]
-    const { count: acceptedCount } = await supabase
-      .from('relief_requests')
-      .select('id', { count: 'exact', head: true })
-      .eq('acceptor_id', user.id)
-      .eq('congregation_id', user.congregation_id)
-      .eq('status', 'accepted')
-      .gte('accepted_at', thisMonthStart)
-      .lt('accepted_at', thisMonthEnd)
-    setMyMonthlyReliefCount(acceptedCount ?? 0)
 
     // Cargar solicitudes de relevo
     const { data } = await supabase
@@ -212,10 +142,6 @@ export default function ReliefBadge() {
   // ─── Aceptar relevo ───────────────────────────────────────
   const handleAccept = async (reliefId: string) => {
     if (!user) return
-    if (myCurrentCount >= maxTurnos) {
-      alert('Ya alcanzaste tu límite de turnos para este período.')
-      return
-    }
     setActionLoading(reliefId)
     const { data, error } = await supabase
       .rpc('accept_relief', {
@@ -251,9 +177,6 @@ export default function ReliefBadge() {
   if (!user || (loading && reliefs.length === 0)) return null
   if (!loading && reliefs.length === 0) return null
 
-  const hasCapacity      = myCurrentCount < maxTurnos
-  const hasReliefCapacity = myMonthlyReliefCount < reliefMonthlyLimit
-
   return (
     <div ref={panelRef} className="bg-white rounded-xl shadow-md border border-orange-100 mb-4">
       {/* Cabecera */}
@@ -273,22 +196,6 @@ export default function ReliefBadge() {
 
       {expanded && (
         <div className="border-t border-gray-100 divide-y divide-gray-50">
-          {/* Contador mensual de relevos aceptados */}
-          {!loading && (
-            <div className={`mx-4 mt-3 mb-1 px-3 py-2 rounded-lg text-xs font-medium flex items-center gap-1.5 ${
-              myMonthlyReliefCount >= reliefMonthlyLimit
-                ? 'bg-red-50 text-red-700 border border-red-200'
-                : myMonthlyReliefCount === reliefMonthlyLimit - 1
-                ? 'bg-amber-50 text-amber-700 border border-amber-200'
-                : 'bg-green-50 text-green-700 border border-green-200'
-            }`}>
-              <span>{myMonthlyReliefCount >= reliefMonthlyLimit ? '🔴' : myMonthlyReliefCount === reliefMonthlyLimit - 1 ? '🟡' : '🟢'}</span>
-              Has aceptado{' '}
-              <strong>{myMonthlyReliefCount} de {reliefMonthlyLimit}</strong>{' '}
-              relevo{reliefMonthlyLimit !== 1 ? 's' : ''} este mes
-              {myMonthlyReliefCount >= reliefMonthlyLimit && ' — ya alcanzaste tu límite.'}
-            </div>
-          )}
           {loading ? (
             <div className="flex justify-center py-4">
               <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-orange-500" />
@@ -329,25 +236,12 @@ export default function ReliefBadge() {
                         {isUrgent ? '⚠️ Urgente · expira en' : '⏱ Expira en'} {remaining}
                       </p>
                     )}
-                    {/* Aviso si no tiene cupo de turnos */}
-                    {!hasCapacity && (
-                      <p className="text-[11px] text-gray-400 mt-0.5">
-                        Ya alcanzaste tu límite de turnos este período.
-                      </p>
-                    )}
-                    {/* Aviso si alcanzó límite mensual de relevos */}
-                    {!hasReliefCapacity && (
-                      <p className="text-[11px] text-red-400 mt-0.5">
-                        Límite de relevos del mes alcanzado ({reliefMonthlyLimit} máx.).
-                      </p>
-                    )}
                   </div>
 
                   <div className="flex gap-2 shrink-0">
                     <button
                       onClick={() => handleAccept(rel.id)}
-                      disabled={isLoading || !hasCapacity || !hasReliefCapacity}
-                      title={!hasReliefCapacity ? `Has alcanzado tu límite de relevos para este mes (${reliefMonthlyLimit} máx.)` : undefined}
+                      disabled={isLoading}
                       className="px-3 py-1.5 text-xs font-medium bg-orange-500 text-white rounded-lg hover:bg-orange-600 disabled:opacity-40 transition"
                     >
                       {isLoading ? '...' : '✅ Tomar turno'}

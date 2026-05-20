@@ -21,10 +21,8 @@
  *   • Azul   = turno completo (2/2) ✓
  *   • Gris   = bloque bloqueado (ej: Reunión)
  *
- * Límites semanales (Fase 1):
- *   • Publicador       = 1 turno/semana
- *   • Precursor Regular = 2 turnos/semana
- *   • Precursor Auxiliar = 2 turnos/semana (será 6/mes en Fase 4)
+ * Sin límites de turnos:
+ *   • Los usuarios pueden agendar sin restricciones de cantidad.
  * ─────────────────────────────────────────────────────────────
  */
 'use client'
@@ -35,7 +33,7 @@ import { useUser } from '@/context/UserContext'
 import ActiveWeekBanner from '@/components/ActiveWeekBanner'
 import {
   Exhibitor, TimeSlot, Reservation, User,
-  DAYS_OF_WEEK, DAY_ORDER, WEEKLY_LIMITS, MONTHLY_LIMITS,
+  DAYS_OF_WEEK, DAY_ORDER,
   USER_TYPE_LABELS, formatTimeLabel, getMonthStart,
   isLastWeekOfMonth, getMonthStartFromWeek,
 } from '@/types'
@@ -120,11 +118,8 @@ function getDisplayBlockReason(reason: string | null | undefined): string {
   return raw
 }
 
-// Tipo extendido para candidatos de invitación (incluye detección de turno huérfano)
-type InviteCandidate = Pick<User, 'id' | 'name' | 'user_type'> & {
-  hasOrphanConflict: boolean
-  orphanLabel: string | null
-}
+// Tipo extendido para candidatos de invitación
+type InviteCandidate = Pick<User, 'id' | 'name' | 'user_type'>
 
 export default function ExhibitorGrid() {
   // --- Estado del componente ---
@@ -142,7 +137,7 @@ export default function ExhibitorGrid() {
   const [countingMode, setCountingMode] = useState<'weekly' | 'monthly'>('weekly')
   const [monthlyReservations, setMonthlyReservations] = useState<Reservation[]>([])
   // Compensación de última semana: cuando está activa, en la última
-  // semana del mes el límite semanal se reemplaza por la cuota mensual.
+  // semana del mes el conteo mostrado usa el total mensual.
   const [lastWeekCompensation, setLastWeekCompensation] = useState(false)
   // Ventana de cancelación en ms (configurable por admin, defecto 5 min)
   const [cancelWindowMs, setCancelWindowMs] = useState(5 * 60_000)
@@ -184,12 +179,6 @@ export default function ExhibitorGrid() {
   // Invitaciones pendientes en slots de esta semana (para mostrar ⏳ en celdas 1/2)
   const [slotPendingInvitations, setSlotPendingInvitations] = useState<
     { slot_id: string; to_user_id: string; expires_at: string }[]
-  >([])
-  // Mis invitaciones recibidas pendientes (para alertar antes de reservar nuevo turno)
-  const [myPendingInvitations, setMyPendingInvitations] = useState<
-    { id: string; slot_id: string; expires_at: string;
-      from_user?: { name: string };
-      slot?: { day_of_week: number; start_time: string; end_time: string } }[]
   >([])
   // ─── Estado de relevos (Fase 9A) ──────────────────────────
   // myPendingReliefs: relevos que YO solicité esta semana (pendientes)
@@ -340,16 +329,6 @@ export default function ExhibitorGrid() {
         .eq('week_start', weekStart)
         .eq('status', 'pending')
       if (invData) setSentInvitations(invData as {slot_id: string; to_user_id: string}[])
-
-      // Mis invitaciones recibidas pendientes y no expiradas (para verificar antes de reservar)
-      const { data: myInvData } = await supabase
-        .from('invitations')
-        .select('id, slot_id, expires_at, from_user:users!invitations_from_user_id_fkey(name), slot:time_slots!invitations_slot_id_fkey(day_of_week, start_time, end_time)')
-        .eq('to_user_id', user.id)
-        .eq('week_start', weekStart)
-        .eq('status', 'pending')
-        .gt('expires_at', nowIso)
-      if (myInvData) setMyPendingInvitations(myInvData as unknown as typeof myPendingInvitations)
 
       // Fase 9A: Cargar mis solicitudes de relevo pendientes y no expiradas
       // (para mostrar ⏳ en celdas 2/2 en lugar del botón Cancelar)
@@ -515,7 +494,6 @@ export default function ExhibitorGrid() {
     setSentInvitations([])
     setAcceptedInvitationSlots([])
     setSlotPendingInvitations([])
-    setMyPendingInvitations([])
     setMyPendingReliefs([])
     setOpenReliefBySlot({})
   }, [user?.id])
@@ -583,11 +561,10 @@ export default function ExhibitorGrid() {
   const getSlotReservations = (slotId: string) =>
     reservations.filter(r => r.time_slot_id === slotId && r.status !== 'cancelled')
 
-  // ─── Contadores y límites (Fase 4 + compensación de última semana) ─
+  // ─── Contadores informativos (sin límites) ────────────────────
   // isCompensationActive: modo semanal + compensación habilitada +
-  //   esta semana es la última del mes. Cuando es true, se usan los
-  //   MONTHLY_LIMITS contra el total del mes (= mismo comportamiento
-  //   que modo mensual, pero SOLO en la última semana).
+  //   esta semana es la última del mes. Se usa solo para el conteo
+  //   informativo del período mostrado al usuario.
   const isCompensationActive =
     countingMode === 'weekly' && lastWeekCompensation && isLastWeekOfMonth(weekStart)
 
@@ -598,9 +575,6 @@ export default function ExhibitorGrid() {
   const countSource = (countingMode === 'monthly' || isCompensationActive)
     ? monthlyReservations
     : reservations
-  const limitsTable = (countingMode === 'monthly' || isCompensationActive)
-    ? MONTHLY_LIMITS
-    : WEEKLY_LIMITS
   const periodLabel = countingMode === 'monthly'
     ? 'este mes'
     : isCompensationActive
@@ -610,14 +584,7 @@ export default function ExhibitorGrid() {
   const userReservationCount = countSource.filter(
     r => r.user_id === user?.id && r.status !== 'cancelled'
   ).length
-  const maxTurnos = limitsTable[user?.user_type ?? 'publicador'] ?? 1
-  const canReserve = userReservationCount < maxTurnos
-  // Conteo de reservas del cónyuge (Fase 3 + Fase 4)
-  const spouseReservationCount = spouse
-    ? countSource.filter(r => r.user_id === spouse.id && r.status !== 'cancelled').length
-    : 0
-  const spouseMaxTurnos = spouse ? (limitsTable[spouse.user_type] ?? 1) : 0
-  const spouseCanReserve = spouse ? spouseReservationCount < spouseMaxTurnos : false
+  const spouseCanReserve = Boolean(spouse)
 
   // ─── Fase 6: Helpers de ventana de prioridad ───────────────────
 
@@ -708,7 +675,6 @@ export default function ExhibitorGrid() {
 
   /**
    * handleOpenInviteModal - Carga candidatos para invitar.
-   * Fase 7b: excluye usuarios que ya tienen su límite de turnos lleno.
    */
   const handleOpenInviteModal = async (slotId: string) => {
     setInviteModalSlot(slotId)
@@ -723,7 +689,7 @@ export default function ExhibitorGrid() {
     if (spouse) occupiedIds.add(spouse.id) // Cónyuge ya auto-asignado
     // Nota Fase 7b: NO excluimos a quienes ya tienen invitación pendiente.
     // Un usuario puede recibir varias invitaciones y decide cuál acepta.
-    // El RPC accept_invitation verifica capacidad del slot y límites al momento de aceptar.
+    // El RPC accept_invitation verifica capacidad del slot al momento de aceptar.
 
     // Cargar usuarios activos del mismo género y misma congregación.
     // Usa ruta API del servidor (service client) para evitar restricciones
@@ -741,76 +707,8 @@ export default function ExhibitorGrid() {
     const candidates: Pick<User, 'id' | 'name' | 'user_type'>[] =
       res.ok ? await res.json() : []
 
-    const candidateIds = candidates
-      .map(u => u.id)
-      .filter(id => !occupiedIds.has(id))
-
-    // Contar reservas activas de esos candidatos en el período actual
-    const reservationCounts = new Map<string, number>()
-    if (candidateIds.length > 0) {
-      const { data: resCounts } = await supabase
-        .from('reservations')
-        .select('user_id')
-        .in('user_id', candidateIds)
-        .eq('week_start', weekStart)
-        .neq('status', 'cancelled')
-      resCounts?.forEach(r => {
-        reservationCounts.set(r.user_id, (reservationCounts.get(r.user_id) ?? 0) + 1)
-      })
-    }
-
-    // Fase 4: Detectar turnos huérfanos (slots con 1 sola reserva en la semana)
-    // para candidatos que ya alcanzaron su límite. Si tienen un turno huérfano,
-    // igual pueden recibir una invitación, pero se les mostrará un aviso.
-    const orphanSlotByUser = new Map<string, { exhibitorName: string; dayOfWeek: number; startTime: string; endTime: string }>()
-    const atLimitCandidates = candidates.filter(u => {
-      if (occupiedIds.has(u.id)) return false
-      const count = reservationCounts.get(u.id) ?? 0
-      const max = limitsTable[u.user_type] ?? 1
-      return count >= max
-    })
-    for (const c of atLimitCandidates) {
-      // Buscar una reserva de este candidato donde el slot solo tenga 1 persona
-      const orphanRes = reservations.find(r => {
-        if (r.user_id !== c.id || r.status === 'cancelled') return false
-        const slotCount = reservations.filter(
-          x => x.time_slot_id === r.time_slot_id && x.status !== 'cancelled'
-        ).length
-        return slotCount === 1
-      })
-      if (orphanRes) {
-        const slot = timeSlots.find(s => s.id === orphanRes.time_slot_id)
-        const exhibitor = exhibitors.find(e => slot && e.id === slot.exhibitor_id)
-        orphanSlotByUser.set(c.id, {
-          exhibitorName: exhibitor?.name ?? 'Exhibidor',
-          dayOfWeek: slot?.day_of_week ?? 0,
-          startTime: slot?.start_time ?? '',
-          endTime: slot?.end_time ?? '',
-        })
-      }
-    }
-
-    // Candidatos finales:
-    //   • Por debajo de su límite → aparecen normalmente
-    //   • En su límite CON turno huérfano → aparecen con aviso de conflicto
-    //   • En su límite SIN turno huérfano (todos emparejados) → excluidos
     const available: InviteCandidate[] = candidates
-      .filter(u => {
-        if (occupiedIds.has(u.id)) return false
-        const count = reservationCounts.get(u.id) ?? 0
-        const max = limitsTable[u.user_type] ?? 1
-        return count < max || orphanSlotByUser.has(u.id)
-      })
-      .map(u => ({
-        ...u,
-        hasOrphanConflict: orphanSlotByUser.has(u.id),
-        orphanLabel: orphanSlotByUser.has(u.id)
-          ? (() => {
-              const o = orphanSlotByUser.get(u.id)!
-              return `${o.exhibitorName} – ${DAYS_OF_WEEK[o.dayOfWeek]} ${formatTimeLabel(o.startTime, o.endTime)}`
-            })()
-          : null,
-      }))
+      .filter(u => !occupiedIds.has(u.id))
 
     setInviteUsers(available)
     setInviteLoading(false)
@@ -856,7 +754,7 @@ export default function ExhibitorGrid() {
    *
    * Fase 9A: Si el turno ocurre en < 24 h → relevo abierto automático.
    * Si faltan ≥ 24 h el usuario puede elegir:
-   *   • Abierto  → notifica a todos los del mismo género con cupo
+   *   • Abierto  → notifica a todos los del mismo género disponibles
    *   • Personal → elige un compañero específico
    */
   const handleOpenReliefModal = async (reservation: Reservation) => {
@@ -891,22 +789,8 @@ export default function ExhibitorGrid() {
     const { data } = await query
 
     const candidates = (data ?? []) as Pick<User, 'id' | 'name' | 'user_type'>[]
-    const reservationCountByUser = new Map<string, number>()
 
-    for (const res of countSource) {
-      reservationCountByUser.set(
-        res.user_id,
-        (reservationCountByUser.get(res.user_id) ?? 0) + 1
-      )
-    }
-
-    const eligibleCandidates = candidates.filter(candidate => {
-      const currentCount = reservationCountByUser.get(candidate.id) ?? 0
-      const maxForCandidate = limitsTable[candidate.user_type] ?? 1
-      return currentCount < maxForCandidate
-    })
-
-    setReliefUsers(eligibleCandidates)
+    setReliefUsers(candidates)
     setReliefModal({ reservationId: reservation.id, slotId: reservation.time_slot_id, isUrgent: false })
     setReliefType('open')
     setReliefPersonalId(null)
@@ -1037,43 +921,6 @@ export default function ExhibitorGrid() {
       return
     }
 
-    // ─ Fase 7b: Verificar invitaciones pendientes recibidas ────────────
-    // Si el usuario tiene invitaciones pendientes y reservar aquí
-    // lo dejaría sin cupo para aceptarlas, se le pregunta si quiere declinarlas.
-    const now = new Date()
-    const activeInvitations = myPendingInvitations.filter(
-      inv => new Date(inv.expires_at) > now
-    )
-    const currentCount = countSource.filter(
-      r => r.user_id === user.id && r.status !== 'cancelled'
-    ).length
-
-    if (activeInvitations.length > 0 && currentCount + 1 >= maxTurnos) {
-      const inv = activeInvitations[0]
-      const DIAS = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado']
-      const diaInv  = inv.slot ? DIAS[inv.slot.day_of_week] : 'otro día'
-      const horaInv = inv.slot
-        ? inv.slot.start_time.slice(0, 5)
-        : ''
-      const confirmar = window.confirm(
-        `Tienes una invitación pendiente de ${inv.from_user?.name ?? 'alguien'} para el ${diaInv} a las ${horaInv}.\n\n¿Deseas rechazarla para poder agendar este turno?`
-      )
-      if (!confirmar) {
-        setActionLoading(null)
-        return
-      }
-      // Declinar la invitación y continuar con la reserva
-      await supabase.from('invitations').update({ status: 'declined' }).eq('id', inv.id)
-      setMyPendingInvitations(prev => prev.filter(i => i.id !== inv.id))
-    }
-
-    // Validar límite de turnos del período actual (Fase 4)
-    if (currentCount >= maxTurnos) {
-      alert(`Ya tienes ${maxTurnos} turno(s) reservado(s) ${periodLabel}.`)
-      setActionLoading(null)
-      return
-    }
-
     // Verificar ocupación actual del slot
     const slotRes = getSlotReservations(slotId)
     if (slotRes.length >= 2) {
@@ -1086,7 +933,7 @@ export default function ExhibitorGrid() {
     const position = slotIsEmpty ? 1 : 2
 
     // Si el turno está vacío y hay cónyuge vinculado, mostrar elección
-    // (aunque el cónyuge esté sin cupo, el modal lo indica claramente)
+    // (sin restricciones de cantidad, solo disponibilidad del slot)
     if (slotIsEmpty && spouse && withSpouse === undefined) {
       setCoupleModal(slotId)
       setActionLoading(null)
@@ -1275,7 +1122,8 @@ export default function ExhibitorGrid() {
       <div className="mb-4 bg-indigo-50 rounded-xl px-4 py-3 flex items-center justify-between flex-wrap gap-2">
         <div className="flex items-center gap-3 flex-wrap">
           <span className="text-sm text-indigo-700">
-            Turnos {periodLabel}: <strong>{userReservationCount}/{maxTurnos}</strong>
+            Turnos {periodLabel}: <strong>{userReservationCount}</strong>{' '}
+            <span className="text-xs text-indigo-500">· sin límite</span>
           </span>
           {user && (
             <span className="text-xs bg-indigo-200 text-indigo-800 px-2 py-0.5 rounded-full font-medium">
@@ -1466,14 +1314,12 @@ export default function ExhibitorGrid() {
                         )}
                         <button
                           onClick={() => handleReserve(slot.id)}
-                          disabled={!canReserve || actionLoading === slot.id}
+                          disabled={actionLoading === slot.id}
                           className={`w-full py-3 px-1 text-xs rounded-lg transition-all ${
-                            canReserve
-                              ? isTooClose
-                                ? 'bg-yellow-50 text-yellow-700 hover:bg-yellow-100 hover:shadow-sm cursor-pointer border border-yellow-200'
-                                : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100 hover:shadow-sm cursor-pointer'
-                              : 'bg-gray-50 text-gray-400 cursor-not-allowed'
-                          }`}
+                            isTooClose
+                              ? 'bg-yellow-50 text-yellow-700 hover:bg-yellow-100 hover:shadow-sm cursor-pointer border border-yellow-200'
+                              : 'bg-indigo-50 text-indigo-600 hover:bg-indigo-100 hover:shadow-sm cursor-pointer'
+                          } ${actionLoading === slot.id ? 'opacity-50 cursor-not-allowed' : ''}`}
                         >
                           {actionLoading === slot.id
                             ? '...'
@@ -1555,8 +1401,8 @@ export default function ExhibitorGrid() {
                                   ✉️ Invitar
                                 </button>
                               )
-                            ) : hasSpouseReservation && canReserve ? (
-                              // Mi cónyuge ya está en el turno: puedo unirme aunque tenga cupo lleno
+                            ) : hasSpouseReservation ? (
+                              // Mi cónyuge ya está en el turno: puedo unirme
                               // (el matrimonio comparte turnos sin restricción de posición)
                               <button
                                 onClick={() => handleReserve(slot.id)}
@@ -1565,7 +1411,7 @@ export default function ExhibitorGrid() {
                               >
                                 {actionLoading === slot.id ? '...' : '💑 Unirme a mi cónyuge'}
                               </button>
-                            ) : !hasSpouseReservation && canReserve ? (
+                            ) : !hasSpouseReservation ? (
                               // Alguien más tiene el turno: verificar compatibilidad de género
                               isCompatiblePartner(reservation!) ? (() => {
                                 // Hay invitación pendiente no expirada para este slot?
@@ -1791,21 +1637,13 @@ export default function ExhibitorGrid() {
                           </p>
                         )}
                         {hasOpenRelief && (
-                          <>
-                            {canReserve ? (
-                              <button
-                                onClick={() => handleAcceptOpenRelief(openReliefBySlot[slot.id].id)}
-                                disabled={actionLoading === openReliefBySlot[slot.id].id}
-                                className="w-full mt-1 py-1 text-[10px] rounded bg-orange-100 text-orange-700 hover:bg-orange-200 disabled:opacity-50 transition"
-                              >
-                                {actionLoading === openReliefBySlot[slot.id].id ? '...' : '✅ Tomar relevo'}
-                              </button>
-                            ) : (
-                              <p className="text-[10px] text-gray-500 mt-0.5">
-                                Sin cupo para tomar relevo.
-                              </p>
-                            )}
-                          </>
+                          <button
+                            onClick={() => handleAcceptOpenRelief(openReliefBySlot[slot.id].id)}
+                            disabled={actionLoading === openReliefBySlot[slot.id].id}
+                            className="w-full mt-1 py-1 text-[10px] rounded bg-orange-100 text-orange-700 hover:bg-orange-200 disabled:opacity-50 transition"
+                          >
+                            {actionLoading === openReliefBySlot[slot.id].id ? '...' : '✅ Tomar relevo'}
+                          </button>
                         )}
                         {/* Indicador completo */}
                         <p className="text-[10px] text-green-600 font-bold mt-0.5">2/2 ✓</p>
@@ -1862,11 +1700,7 @@ export default function ExhibitorGrid() {
                         <div>
                           <p className="text-sm font-medium text-gray-800">{u.name}</p>
                           <p className="text-[11px] text-gray-500">{USER_TYPE_LABELS[u.user_type]}</p>
-                          {u.hasOrphanConflict && u.orphanLabel && (
-                            <p className="text-[10px] text-amber-600 mt-0.5 max-w-[160px] leading-tight">
-                              ⚠️ Si acepta, libera: {u.orphanLabel}
-                            </p>
-                          )}
+                          {/* Sin validación de cupo: no hay avisos de conflicto */}
                         </div>
                         {alreadySent ? (
                           <span className="text-xs text-indigo-400 font-medium">✓ Enviada</span>
@@ -1937,7 +1771,7 @@ export default function ExhibitorGrid() {
 
               {reliefType === 'open' ? (
                 <p className="text-xs text-gray-500 bg-orange-50 p-3 rounded-lg">
-                  Se notificará a todos los hermanos del mismo género con cupo disponible.
+                  Se notificará a todos los hermanos del mismo género disponibles.
                   El primero en aceptar tomará tu turno.
                 </p>
               ) : (
@@ -2026,25 +1860,16 @@ export default function ExhibitorGrid() {
                 className="w-full py-2.5 text-sm rounded-xl bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition text-left px-3"
               >
                 <span className="font-medium">👤 Solo yo</span>
-                <p className="text-[11px] text-indigo-400 mt-0.5">{spouse?.name} puede agendar por separado si hay cupo.</p>
+                <p className="text-[11px] text-indigo-400 mt-0.5">{spouse?.name} puede agendar por separado si hay espacio en el turno.</p>
               </button>
-              {/* Opción: ambos — deshabilitada si el cónyuge no tiene cupo */}
-              {spouseCanReserve ? (
-                <button
-                  onClick={() => { const s = coupleModal; setCoupleModal(null); handleReserve(s, true) }}
-                  className="w-full py-2.5 text-sm rounded-xl bg-pink-50 text-pink-700 hover:bg-pink-100 transition text-left px-3"
-                >
-                  <span className="font-medium">💑 Agendar con {spouse?.name}</span>
-                  <p className="text-[11px] text-pink-400 mt-0.5">Reservar los dos lugares del turno juntos automáticamente.</p>
-                </button>
-              ) : (
-                <div className="w-full py-2.5 text-sm rounded-xl bg-gray-50 border border-gray-200 text-left px-3 opacity-60 cursor-not-allowed">
-                  <span className="font-medium text-gray-400">💑 Agendar con {spouse?.name}</span>
-                  <p className="text-[11px] text-red-400 mt-0.5">
-                    {spouse?.name} ya alcanzó su límite de turnos {periodLabel}. No puede ser agendado/a.
-                  </p>
-                </div>
-              )}
+              {/* Opción: ambos */}
+              <button
+                onClick={() => { const s = coupleModal; setCoupleModal(null); handleReserve(s, true) }}
+                className="w-full py-2.5 text-sm rounded-xl bg-pink-50 text-pink-700 hover:bg-pink-100 transition text-left px-3"
+              >
+                <span className="font-medium">💑 Agendar con {spouse?.name}</span>
+                <p className="text-[11px] text-pink-400 mt-0.5">Reservar los dos lugares del turno juntos automáticamente.</p>
+              </button>
             </div>
           </div>
         </div>
