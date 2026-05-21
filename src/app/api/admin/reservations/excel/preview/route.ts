@@ -25,7 +25,6 @@ import {
   parseBlockedInstruction,
   parseWeekDate,
   addDays,
-  shortTime,
   resolveExhibitor,
   resolveUser,
   DAY_LABELS,
@@ -37,7 +36,7 @@ import {
   type SlotUpdatePatch,
   type SlotToCreate,
 } from '@/lib/slots/excel-import'
-import { hasTimeConflict, calculateEndTime } from '@/lib/slots/conflict-detection'
+import { hasTimeConflict, calculateEndTime, shortTime } from '@/lib/slots/conflict-detection'
 
 export const dynamic = 'force-dynamic'
 export const revalidate = 0
