@@ -193,7 +193,8 @@ export function parseBlockedInstruction(
   const estado = normalizeText(estadoRaw)
   if (estado === 'bloqueado') return { value: true }
   if (['libre', 'parcial', 'completo'].includes(estado)) return { value: false }
-  return { value: null }
+  // Celda vacía → Disponible (no bloqueado)
+  return { value: false }
 }
 
 // ─── Lectora de Excel ────────────────────────────────────────
