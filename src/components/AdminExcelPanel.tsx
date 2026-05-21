@@ -28,6 +28,33 @@ type ImportResult = {
   message?: string
 } | null
 
+// ─── Tipos para Vista Previa (Iteración 3) ───────────────────
+type SlotActionRow = {
+  rowNum: number
+  exhibitor_name: string
+  day: string
+  hour: string
+  action: 'CREADO' | 'ACTUALIZADO' | 'EXISTENTE' | 'ERROR'
+  message?: string
+  slot_id?: string
+}
+
+type PreviewResult = {
+  ok: boolean
+  preview: true
+  totalRows: number
+  targetWeek: string
+  slotActions: SlotActionRow[]
+  createdSlots: number
+  updatedSlots: number
+  errorSlots: number
+  existingSlots: number
+  userAssignments: number
+  skipped: number
+  errors: string[]
+  message: string
+} | null
+
 type VisualReportRow = {
   day_of_week: number
   day_label: string
@@ -548,6 +575,11 @@ export default function AdminExcelPanel() {
   const [result, setResult] = useState<ImportResult>(null)
   const [resultTitle, setResultTitle] = useState('📋 Resultado de la importación')
   const [error, setError] = useState('')
+  // ─── Vista previa (Iteración 3) ─────────────────────────
+  const [previewData, setPreviewData] = useState<PreviewResult>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [pendingFile, setPendingFile] = useState<File | null>(null)
+  const [confirming, setConfirming] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const reservationsFileInputRef = useRef<HTMLInputElement>(null)
 
@@ -803,6 +835,91 @@ export default function AdminExcelPanel() {
   }
 
   // =============================================================
+  // Vista previa de importación de reservas (Iteración 3)
+  // =============================================================
+  const handlePreviewReservations = async (file: File) => {
+    setPreviewLoading(true)
+    setError('')
+    setResult(null)
+    setPreviewData(null)
+
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+
+      const res = await fetch('/api/admin/reservations/excel/preview', {
+        method: 'POST',
+        headers: { 'x-access-key': accessKey },
+        body: formData,
+      })
+
+      const json = await res.json()
+
+      if (!res.ok && res.status !== 422) {
+        setError(json.error ?? `Error ${res.status}`)
+        setPendingFile(null)
+      } else {
+        setPreviewData(json as PreviewResult)
+        setPendingFile(file)
+      }
+    } catch {
+      setError('Error de conexión al obtener vista previa.')
+      setPendingFile(null)
+    } finally {
+      setPreviewLoading(false)
+    }
+  }
+
+  // =============================================================
+  // Confirmar importación de reservas (después de preview)
+  // =============================================================
+  const handleConfirmImport = async () => {
+    if (!pendingFile) return
+
+    setConfirming(true)
+    setError('')
+    setResult(null)
+
+    try {
+      const formData = new FormData()
+      formData.append('file', pendingFile)
+
+      const res = await fetch('/api/admin/reservations/excel', {
+        method: 'POST',
+        headers: { 'x-access-key': accessKey },
+        body: formData,
+      })
+
+      const json = await res.json()
+
+      if (!res.ok && res.status !== 422) {
+        setError(json.error ?? `Error ${res.status}`)
+      } else {
+        setResultTitle('📋 Resultado de la importación de reservas')
+        setResult(json as ImportResult)
+        // Iteración 4: Notificar al AdminScheduleGrid para refrescar
+        window.dispatchEvent(new CustomEvent('reservations-imported'))
+      }
+    } catch {
+      setError('Error de conexión al subir reservas.')
+    } finally {
+      setConfirming(false)
+      setPreviewData(null)
+      setPendingFile(null)
+    }
+  }
+
+  // =============================================================
+  // Cancelar preview y limpiar
+  // =============================================================
+  const handleCancelPreview = () => {
+    setPreviewData(null)
+    setPendingFile(null)
+    setError('')
+    if (reservationsFileInputRef.current) reservationsFileInputRef.current.value = ''
+  }
+
+  // =============================================================
   // Render
   // =============================================================
   return (
@@ -836,30 +953,141 @@ export default function AdminExcelPanel() {
           </button>
         </div>
 
-        {/* Subir reservas (semana del archivo) */}
+        {/* Subir reservas (semana del archivo) — con Vista Previa (Iteración 3) */}
         <div className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm">
-          <h3 className="font-semibold text-gray-700 mb-2">⬆️ Subir reservas (semana del archivo)</h3>
+          <h3 className="font-semibold text-gray-700 mb-2">⬆️ Subir reservas (vista previa)</h3>
           <p className="text-sm text-gray-500 mb-4">
-            Sube el Excel modificado para aplicar Publicador A/Publicador B a la semana indicada en la columna <strong>semana</strong>.
+            Vista previa antes de aplicar. Sube el Excel modificado; revisa los cambios y luego confirma.
           </p>
-          <label
-            className={`block w-full text-center px-4 py-2.5 rounded-lg font-medium
-                        transition-colors cursor-pointer
-                        ${uploadingReservations
-                          ? 'bg-gray-300 text-gray-500 cursor-wait'
-                          : 'bg-cyan-600 text-white hover:bg-cyan-700'
-                        }`}
-          >
-            {uploadingReservations ? 'Procesando...' : 'Subir reservas .xlsx'}
-            <input
-              ref={reservationsFileInputRef}
-              type="file"
-              accept=".xlsx,.xls"
-              onChange={handleUploadReservations}
-              disabled={uploadingReservations}
-              className="hidden"
-            />
-          </label>
+
+          {previewData ? (
+            <div className="space-y-3">
+              {/* Resumen del preview */}
+              <div className="grid grid-cols-3 gap-2 text-center text-xs">
+                <div className="bg-green-50 rounded-lg p-2">
+                  <div className="font-bold text-green-700 text-sm">{previewData.createdSlots}</div>
+                  <div className="text-green-600">Crear</div>
+                </div>
+                <div className="bg-blue-50 rounded-lg p-2">
+                  <div className="font-bold text-blue-700 text-sm">{previewData.updatedSlots}</div>
+                  <div className="text-blue-600">Actualizar</div>
+                </div>
+                <div className="bg-purple-50 rounded-lg p-2">
+                  <div className="font-bold text-purple-700 text-sm">{previewData.userAssignments}</div>
+                  <div className="text-purple-600">Asignaciones</div>
+                </div>
+              </div>
+
+              {previewData.errorSlots > 0 && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-2 text-xs text-red-700">
+                  ⚠️ {previewData.errorSlots} error(es) — revisa la tabla debajo.
+                </div>
+              )}
+
+              {/* Tabla de acciones */}
+              <div className="max-h-48 overflow-y-auto border border-gray-200 rounded-lg text-xs">
+                <table className="w-full text-left">
+                  <thead className="bg-gray-50 sticky top-0">
+                    <tr className="text-gray-600 font-semibold">
+                      <th className="px-2 py-1">#</th>
+                      <th className="px-2 py-1">Acción</th>
+                      <th className="px-2 py-1">Exhibidor</th>
+                      <th className="px-2 py-1">Día</th>
+                      <th className="px-2 py-1">Hora</th>
+                      <th className="px-2 py-1">Detalle</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {previewData.slotActions.map((act, idx) => (
+                      <tr key={idx} className={`${
+                        act.action === 'ERROR' ? 'bg-red-50' :
+                        act.action === 'CREADO' ? 'bg-green-50' :
+                        act.action === 'ACTUALIZADO' ? 'bg-blue-50' : ''
+                      }`}>
+                        <td className="px-2 py-1 text-gray-500">{act.rowNum}</td>
+                        <td className="px-2 py-1">
+                          <span className={`font-semibold ${
+                            act.action === 'ERROR' ? 'text-red-600' :
+                            act.action === 'CREADO' ? 'text-green-600' :
+                            act.action === 'ACTUALIZADO' ? 'text-blue-600' :
+                            'text-gray-500'
+                          }`}>
+                            {act.action}
+                          </span>
+                        </td>
+                        <td className="px-2 py-1">{act.exhibitor_name}</td>
+                        <td className="px-2 py-1">{act.day}</td>
+                        <td className="px-2 py-1">{act.hour}</td>
+                        <td className="px-2 py-1 text-gray-500">{act.message ?? ''}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <p className="text-xs text-gray-500">
+                Semana destino: <strong>{previewData.targetWeek}</strong> | {previewData.totalRows} fila(s) leídas
+              </p>
+
+              {/* Errores de validación */}
+              {previewData.errors.length > 0 && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-2 max-h-24 overflow-y-auto text-xs text-red-700">
+                  {previewData.errors.map((err, i) => <p key={i}>• {err}</p>)}
+                </div>
+              )}
+
+              {/* Botones Confirmar / Cancelar */}
+              <div className="flex gap-2">
+                <button
+                  onClick={handleConfirmImport}
+                  disabled={confirming || previewData.errorSlots > 0}
+                  className={`flex-1 px-3 py-2 rounded-lg font-medium text-sm transition-colors ${
+                    confirming
+                      ? 'bg-gray-300 text-gray-500 cursor-wait'
+                      : previewData.errorSlots > 0
+                        ? 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                        : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                  }`}
+                >
+                  {confirming ? 'Aplicando...' : '✅ Confirmar importación'}
+                </button>
+                <button
+                  onClick={handleCancelPreview}
+                  disabled={confirming}
+                  className="px-3 py-2 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 text-sm font-medium transition-colors"
+                >
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <p className="text-xs text-gray-500 mb-3">
+                Se mostrará una vista previa con los slots a crear, actualizar y las asignaciones antes de aplicar cambios.
+              </p>
+              <label
+                className={`block w-full text-center px-4 py-2.5 rounded-lg font-medium
+                            transition-colors cursor-pointer
+                            ${previewLoading
+                              ? 'bg-gray-300 text-gray-500 cursor-wait'
+                              : 'bg-cyan-600 text-white hover:bg-cyan-700'
+                            }`}
+              >
+                {previewLoading ? 'Generando vista previa...' : 'Seleccionar .xlsx'}
+                <input
+                  ref={reservationsFileInputRef}
+                  type="file"
+                  accept=".xlsx,.xls"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0]
+                    if (file) handlePreviewReservations(file)
+                  }}
+                  disabled={previewLoading}
+                  className="hidden"
+                />
+              </label>
+            </>
+          )}
         </div>
 
         {/* Descargar reservas actuales */}

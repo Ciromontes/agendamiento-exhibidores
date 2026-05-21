@@ -15,8 +15,9 @@
  */
 'use client'
 
-import { useEffect, useState, useCallback, useMemo } from 'react'
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import type { RealtimeChannel } from '@supabase/supabase-js'
 import { Exhibitor, TimeSlot, DAYS_OF_WEEK, DAY_ORDER, formatTimeLabel } from '@/types'
 import { useUser } from '@/context/UserContext'
 
@@ -128,6 +129,47 @@ export default function AdminScheduleGrid() {
 
   useEffect(() => {
     loadData()
+  }, [loadData])
+
+  // ─── Suscripción Realtime (Iteración 4) ──────────────────
+  // Escucha cambios en time_slots y reservations para refrescar
+  // automáticamente la grilla cuando otro admin importa desde Excel.
+  useEffect(() => {
+    if (!congregationId) return
+
+    const slotsChannel: RealtimeChannel = supabase
+      .channel('admin-schedule-slots')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'time_slots', filter: `congregation_id=eq.${congregationId}` },
+        () => loadData(),
+      )
+      .subscribe()
+
+    const reservationsChannel: RealtimeChannel = supabase
+      .channel('admin-schedule-reservations')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'reservations', filter: `congregation_id=eq.${congregationId}` },
+        () => loadData(),
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(slotsChannel)
+      supabase.removeChannel(reservationsChannel)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [congregationId, loadData])
+
+  // ─── Listener de evento de importación completada ─────────
+  // AdminExcelPanel emite 'reservations-imported' tras confirmar
+  // una importación, para que el grid se refresque incluso si
+  // no está montado (el evento persiste en window).
+  useEffect(() => {
+    const handler = () => loadData()
+    window.addEventListener('reservations-imported', handler)
+    return () => window.removeEventListener('reservations-imported', handler)
   }, [loadData])
 
   /**
