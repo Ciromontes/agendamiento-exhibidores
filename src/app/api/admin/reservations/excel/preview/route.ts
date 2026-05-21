@@ -18,7 +18,7 @@ import { verifyAdmin } from '@/lib/supabase/admin-auth'
 import { createServiceClient } from '@/lib/supabase/service'
 import {
   readExcelFile,
-  normalizeColumn,
+  normalizeText,
   parseDayOfWeek,
   parseStartTime,
   parseAssigneeCell,
@@ -135,7 +135,7 @@ export async function POST(req: NextRequest) {
 
   const exhibitorsByName = new Map<string, ExhibitorLookupRow[]>()
   for (const ex of exhibitors as ExhibitorLookupRow[]) {
-    const key = normalizeColumn(ex.name)
+    const key = normalizeText(ex.name)
     const current = exhibitorsByName.get(key) ?? []
     current.push(ex)
     exhibitorsByName.set(key, current)
@@ -143,7 +143,7 @@ export async function POST(req: NextRequest) {
 
   const usersByName = new Map<string, UserLookupRow[]>()
   for (const u of (users ?? []) as UserLookupRow[]) {
-    const key = normalizeColumn(u.name)
+    const key = normalizeText(u.name)
     const current = usersByName.get(key) ?? []
     current.push(u)
     usersByName.set(key, current)
