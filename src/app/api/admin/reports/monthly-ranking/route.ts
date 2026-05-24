@@ -178,7 +178,8 @@ export async function GET(req: NextRequest) {
 
     for (const m of membersInGroup) {
       const exhibMap = userExhibitorCount.get(m.id)
-      if (!exhibMap && exhibMap?.size === 0) continue
+      // Saltar si el usuario no tiene asignaciones en el mes
+      if (!exhibMap) continue
 
       const exhibitors: Record<string, number> = {}
       let memberTotal = 0
