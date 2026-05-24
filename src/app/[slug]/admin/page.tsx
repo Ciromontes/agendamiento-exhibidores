@@ -23,6 +23,7 @@ import AdminExhibitorManager from '@/components/AdminExhibitorManager'
 import AdminResetPanel from '@/components/AdminResetPanel'
 import AdminExcelPanel from '@/components/AdminExcelPanel'
 import AdminHistoryPanel from '@/components/AdminHistoryPanel'
+import AdminGroupManager from '@/components/AdminGroupManager'
 
 type Props = {
   params: Promise<{ slug: string }>
@@ -34,7 +35,7 @@ export default function AdminPage({ params }: Props) {
   const { user, congregationSlug, isLoading, logout } = useUser()
   const router = useRouter()
   const [activeTab, setActiveTab] = useState<
-    'horarios' | 'usuarios' | 'config' | 'reporte' | 'ausentes' | 'exhibidores' | 'excel' | 'reset' | 'historial'
+    'horarios' | 'usuarios' | 'config' | 'reporte' | 'ausentes' | 'exhibidores' | 'grupos' | 'excel' | 'reset' | 'historial'
   >('horarios')
 
   // Protección de ruta: solo admins
@@ -113,6 +114,16 @@ export default function AdminPage({ params }: Props) {
             👥 Gestionar Usuarios
           </button>
           <button
+            onClick={() => setActiveTab('grupos')}
+            className={`px-5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
+              activeTab === 'grupos'
+                ? 'bg-white text-indigo-700 shadow-sm'
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            👥 Grupos
+          </button>
+          <button
             onClick={() => setActiveTab('config')}
             className={`px-5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
               activeTab === 'config'
@@ -177,6 +188,7 @@ export default function AdminPage({ params }: Props) {
 
       <main className="max-w-7xl mx-auto px-4 py-6">
         {activeTab === 'exhibidores' && <AdminExhibitorManager />}
+        {activeTab === 'grupos'     && <AdminGroupManager />}
         {activeTab === 'horarios'   && <AdminScheduleGrid />}
         {activeTab === 'usuarios'   && <AdminUserManager />}
         {activeTab === 'config'     && <AdminConfigPanel />}
