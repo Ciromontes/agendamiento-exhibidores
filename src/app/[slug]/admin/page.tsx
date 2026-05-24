@@ -24,6 +24,7 @@ import AdminResetPanel from '@/components/AdminResetPanel'
 import AdminExcelPanel from '@/components/AdminExcelPanel'
 import AdminHistoryPanel from '@/components/AdminHistoryPanel'
 import AdminGroupManager from '@/components/AdminGroupManager'
+import AdminMonthlyRanking from '@/components/AdminMonthlyRanking'
 
 type Props = {
   params: Promise<{ slug: string }>
@@ -35,7 +36,7 @@ export default function AdminPage({ params }: Props) {
   const { user, congregationSlug, isLoading, logout } = useUser()
   const router = useRouter()
   const [activeTab, setActiveTab] = useState<
-    'horarios' | 'usuarios' | 'config' | 'reporte' | 'ausentes' | 'exhibidores' | 'grupos' | 'excel' | 'reset' | 'historial'
+    'horarios' | 'usuarios' | 'config' | 'reporte' | 'ranking' | 'ausentes' | 'exhibidores' | 'grupos' | 'excel' | 'reset' | 'historial'
   >('horarios')
 
   // Protección de ruta: solo admins
@@ -144,6 +145,16 @@ export default function AdminPage({ params }: Props) {
             📋 Reporte
           </button>
           <button
+            onClick={() => setActiveTab('ranking')}
+            className={`px-5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
+              activeTab === 'ranking'
+                ? 'bg-white text-indigo-700 shadow-sm'
+                : 'text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            🏆 Ranking
+          </button>
+          <button
             onClick={() => setActiveTab('ausentes')}
             className={`px-5 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
               activeTab === 'ausentes'
@@ -193,6 +204,8 @@ export default function AdminPage({ params }: Props) {
         {activeTab === 'usuarios'   && <AdminUserManager />}
         {activeTab === 'config'     && <AdminConfigPanel />}
         {activeTab === 'reporte'    && <AdminWeekReport />}
+        {activeTab === 'ranking'   && <AdminMonthlyRanking />}
+        {activeTab === 'ranking'   && <AdminMonthlyRanking />}
         {activeTab === 'ausentes'   && <AdminAbsencePanel />}
         {activeTab === 'excel'      && <AdminExcelPanel />}
         {activeTab === 'reset'      && <AdminResetPanel />}
@@ -201,3 +214,5 @@ export default function AdminPage({ params }: Props) {
     </div>
   )
 }
+
+
