@@ -42,12 +42,14 @@ App de reserva de turnos para exhibidores (puntos de predicación pública). Per
 - **Iteración 2 COMPLETADA:** Backend con creación automática de slots. Endpoint `POST /api/admin/reservations/excel` crea slots automáticamente si no existen (usando `hasTimeConflict()`), reporta `slotActions` con CREADO/EXISTENTE/ERROR. Lógica compartida en `src/lib/slots/excel-import.ts`.
 - **Iteración 3 COMPLETADA:** UI Preview. Endpoint `POST /api/admin/reservations/excel/preview` analiza el Excel sin aplicar cambios. `AdminExcelPanel` ahora tiene flujo: seleccionar archivo → ver preview (slots a crear/actualizar, errores, asignaciones) → confirmar o cancelar.
 - **Iteración 4 COMPLETADA:** Sincronización visual del Grid. `AdminScheduleGrid` ahora se suscribe a Realtime (`time_slots` + `reservations`) y escucha el evento `reservations-imported` para refrescar automáticamente tras una importación confirmada.
+- **Iteración 5 (Ranking Grupos) Iteración 1 — EN PROGRESO:** Script SQL `40_grupos_capitanes.sql` creado con tablas `user_groups` y columna `users.group_id`. Tipos TypeScript actualizados.
+- **Pendiente:** Iteración 5.2 (UI gestión de grupos), 5.3 (API monthly-ranking), 5.4 (UI Ranking con export PNG/PDF), 5.5 (Excel import/export de grupos)
 
 ## Problema que estamos resolviendo
-~~El Excel no genera slots cuando ya hay reservas. El Excel debe determinar si un slot está disponible, no la BD.~~ **RESUELTO.**
+~~El Excel no genera slots cuando ya hay reservas.~~ **RESUELTO.** Ahora implementando sistema de ranking mensual por grupos con capitanes.
 
 ## Tarea actual
-Iteraciones 2, 3 y 4 completadas. El sistema de importación Excel ahora: (1) crea slots automáticamente si no existen, (2) muestra vista previa de cambios antes de confirmar, y (3) refresca la grilla automáticamente vía Realtime + eventos.
+Iteración 5 (Ranking por Grupos): Crear sistema de grupos con capitanes, ranking mensual de uso de exhibidores por publicador y grupo, exportable a PNG/PDF.
 
 ## Próximos pasos
 1. Pruebas del flujo completo de importación con preview

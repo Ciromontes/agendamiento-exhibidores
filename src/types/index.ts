@@ -3,13 +3,14 @@
  * ─────────────────────────────────────────────────────────────
  * Definiciones de tipos TypeScript para toda la aplicación.
  * Estos tipos coinciden con las tablas de Supabase después de
- * ejecutar los scripts 01-27.
+ * ejecutar los scripts 01-40.
  *
  * V2: 3 tipos de usuario, 2 personas por turno, domingos,
  *     configuración global (app_config).
  * V3: Fase 3 (parejas) + Fase 4 (límites semanal/mensual).
  * V4: Multi-tenant (script 26-27): congregation_id en todas las
  *     tablas + tipo Congregation + is_super_admin en User.
+ * V5: Grupos y capitanes (script 40): user_groups + group_id en User.
  * ─────────────────────────────────────────────────────────────
  */
 
@@ -23,9 +24,18 @@ export type Congregation = {
   created_at: string  // Fecha de creación
 }
 
+// ─── Tipo: Grupo de Usuarios (V5) ────────────────────────────
+export type UserGroup = {
+  id: string          // UUID del grupo
+  name: string        // Nombre del grupo (ej: "Grupo Torres")
+  captain_id: string  // UUID del capitán del grupo
+  congregation_id: string
+  created_at: string
+}
+
 // ─── Tipo: Usuario ───────────────────────────────────────────
 // Representa un publicador o administrador del sistema.
-// Corresponde a la tabla "users" en Supabase (V2).
+// Corresponde a la tabla "users" en Supabase (V2, V5).
 export type User = {
   id: string                   // UUID generado automáticamente
   name: string                 // Nombre completo del publicador
@@ -42,6 +52,7 @@ export type User = {
   is_super_admin: boolean      // V4: Super admin global (todas las congregaciones)
   spouse_id: string | null     // UUID del cónyuge vinculado (Fase 3)
   congregation_id: string      // V4: A qué congregación pertenece
+  group_id: string | null      // V5: Grupo al que pertenece (opcional)
   created_at: string           // Fecha de creación (ISO string)
 }
 
