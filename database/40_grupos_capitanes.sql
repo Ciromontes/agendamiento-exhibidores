@@ -32,7 +32,7 @@
 CREATE TABLE user_groups (
   id              UUID        PRIMARY KEY DEFAULT uuid_generate_v4(),
   name            TEXT        NOT NULL,                              -- Nombre del grupo (ej: "Grupo Torres")
-  captain_id      UUID        NOT NULL                               -- Usuario capitán del grupo
+  captain_id      UUID                                    -- Usuario capitán del grupo (opcional)
                               REFERENCES users(id) ON DELETE RESTRICT,
   congregation_id UUID        NOT NULL                               -- Congregación a la que pertenece
                               REFERENCES congregations(id) ON DELETE CASCADE,

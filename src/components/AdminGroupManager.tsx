@@ -98,6 +98,9 @@ export default function AdminGroupManager() {
     setEditingGroup(group)
     setFormName(group.name)
     setShowModal(true)
+    // También expandir el panel de miembros y cargarlos
+    setExpandedGroup(group.id)
+    loadMembers(group.id)
   }
 
   // ─── Guardar (crear o actualizar) ─────────────────────────
