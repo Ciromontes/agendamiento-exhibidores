@@ -59,8 +59,11 @@ export default function AdminMonthlyRanking() {
   const [data, setData] = useState<RankingPayload | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  // ─── Estado del modal de crear/editar grupo ──────────────
   const [downloadingPNG, setDownloadingPNG] = useState(false)
   const [downloadingPDF, setDownloadingPDF] = useState(false)
+  const [exportingGroupPNG, setExportingGroupPNG] = useState<string | null>(null)
+  const [exportingGroupPDF, setExportingGroupPDF] = useState<string | null>(null)
   const reportRef = useRef<HTMLDivElement>(null)
 
   const loadRanking = useCallback(async () => {
@@ -89,67 +92,159 @@ export default function AdminMonthlyRanking() {
   const allExhibitors = data?.totals.allExhibitors ?? []
 
   /**
-   * Clona un nodo DOM y reemplaza funciones de color no soportadas
-   * por html2canvas (ej: lab(), oklch()) por colores sólidos.
+   * Genera HTML con estilos inline para exportación.
+   * Evita usar clases de Tailwind que contengan lab().
    */
-  function cloneNodeForExport(el: HTMLElement): HTMLElement {
-    const clone = el.cloneNode(true) as HTMLElement
-    // Recorrer todos los elementos del clon y limpiar estilos problemáticos
-    const all = clone.querySelectorAll('*')
-    all.forEach((node) => {
-      const htmlNode = node as HTMLElement
-      const style = htmlNode.style
-      // Reemplazar funciones de color no soportadas
-      if (style.color && style.color.includes('lab(')) style.color = '#374151'
-      if (style.backgroundColor && style.backgroundColor.includes('lab(')) style.backgroundColor = '#ffffff'
-      if (style.borderColor && style.borderColor.includes('lab(')) style.borderColor = '#e5e7eb'
-      // Forzar color de texto oscuro
-      if (!style.color || style.color === 'inherit' || style.color === '') style.color = '#374151'
-    })
-    // Asegurar fondo blanco en el contenedor
-    clone.style.backgroundColor = '#ffffff'
-    clone.style.color = '#374151'
-    // Ocultar temporalmente cualquier elemento con position fixed/absolute
-    // que pueda interferir (botones de exportación, etc.)
-    return clone
+  function buildRankingHtml(
+    filterGroupId?: string,
+  ): string {
+    if (!data) return ''
+    const label = data.monthLabel
+
+    function rowHtml(label: string, style: string): string {
+      return `<td style="padding:6px 10px;border:1px solid #ddd;${style}">${label}</td>`
+    }
+    function cellHtml(val: string | number, style = ''): string {
+      return `<td style="padding:6px 10px;border:1px solid #ddd;text-align:center;${style}">${val}</td>`
+    }
+
+    const groupsToRender = filterGroupId
+      ? data.groups.filter((g) => g.id === filterGroupId)
+      : data.groups
+
+    let html = `<div style="background:#fff;color:#374151;font-family:sans-serif;padding:24px;max-width:1200px">`
+
+    // Encabezado
+    html += `<div style="margin-bottom:20px">`
+    html += `<h2 style="font-size:20px;font-weight:bold;margin:0 0 4px">Ranking Mensual de Uso de Exhibidores</h2>`
+    html += `<p style="font-size:14px;color:#6b7280;margin:0">${label}</p>`
+    html += `<p style="font-size:12px;color:#9ca3af;margin:4px 0 0">Total de asignaciones: ${data.totals.totalAssignments}</p>`
+    html += `</div>`
+
+    // Cada grupo
+    for (const group of groupsToRender) {
+      if (group.members.length === 0) continue
+
+      html += `<div style="margin-bottom:32px">`
+      html += `<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">`
+      html += `<h3 style="font-size:16px;font-weight:bold;color:#4338ca;margin:0">${group.name}</h3>`
+      html += `<span style="font-size:13px;color:#6b7280">Capitán: <b style="color:#374151">${group.captain_name}</b> · Total: <b style="color:#4338ca">${group.totalAssignments}</b></span>`
+      html += `</div>`
+
+      html += `<table style="width:100%;border-collapse:collapse;font-size:13px">`
+      html += `<thead><tr style="background:#f3f4f6">`
+      html += rowHtml('Publicador', 'text-align:left;font-weight:600;color:#374151')
+      html += rowHtml('Tipo', 'text-align:left;font-weight:600;color:#374151')
+      for (const ex of allExhibitors) {
+        html += cellHtml(ex, 'font-weight:600;color:#374151;font-size:12px;white-space:nowrap')
+      }
+      html += cellHtml('Total', 'font-weight:600;color:#374151')
+      html += `</tr></thead><tbody>`
+
+      for (const m of group.members) {
+        const tipo = m.user_type === 'precursor_regular' ? 'PR' : m.user_type === 'precursor_auxiliar' ? 'PA' : 'Pub'
+        html += `<tr style="background:#fafafa">`
+        html += rowHtml(m.name, 'text-align:left;font-weight:500;color:#1f2937;white-space:nowrap')
+        html += rowHtml(tipo, 'text-align:left;font-size:12px;color:#6b7280;white-space:nowrap')
+        for (const ex of allExhibitors) {
+          html += cellHtml(m.exhibitors[ex] ?? '-', 'color:#374151')
+        }
+        html += cellHtml(String(m.totalAssignments), 'font-weight:700;color:#4338ca')
+        html += `</tr>`
+      }
+
+      // Fila total del grupo
+      html += `<tr style="background:#eef2ff">`
+      html += rowHtml(`Total ${group.name}`, 'text-align:left;font-weight:700;color:#374151;padding:6px 10px;border:1px solid #ddd')
+      html += rowHtml('', 'text-align:left;padding:6px 10px;border:1px solid #ddd')
+      for (const ex of allExhibitors) {
+        const totalEx = group.members.reduce((s, m) => s + (m.exhibitors[ex] ?? 0), 0)
+        html += cellHtml(totalEx > 0 ? String(totalEx) : '-', 'font-weight:600;color:#4338ca')
+      }
+      html += cellHtml(String(group.totalAssignments), 'font-weight:700;color:#4338ca')
+      html += `</tr>`
+
+      html += `</tbody></table></div>`
+    }
+
+    // Sin grupo
+    if (data.ungrouped.length > 0 && !filterGroupId) {
+      html += `<div style="margin-bottom:24px">`
+      html += `<h4 style="font-size:14px;font-weight:bold;color:#6b7280;margin:0 0 12px">Sin grupo asignado</h4>`
+      html += `<table style="width:100%;border-collapse:collapse;font-size:13px">`
+      html += `<thead><tr style="background:#f3f4f6">`
+      html += rowHtml('Publicador', 'text-align:left;font-weight:600;color:#374151')
+      for (const ex of allExhibitors) {
+        html += cellHtml(ex, 'font-weight:600;color:#374151;font-size:12px')
+      }
+      html += cellHtml('Total', 'font-weight:600;color:#374151')
+      html += `</tr></thead><tbody>`
+      for (const m of data.ungrouped) {
+        html += `<tr style="background:#fafafa">`
+        html += rowHtml(m.name, 'text-align:left;font-weight:500;color:#1f2937')
+        for (const ex of allExhibitors) {
+          html += cellHtml(m.exhibitors[ex] ?? '-', 'color:#374151')
+        }
+        html += cellHtml(String(m.totalAssignments), 'font-weight:700;color:#374151')
+        html += `</tr>`
+      }
+      html += `</tbody></table></div>`
+    }
+
+    // Pie
+    html += `<div style="margin-top:24px;padding-top:12px;border-top:1px solid #e5e7eb;display:flex;justify-content:space-between;font-size:11px;color:#9ca3af">`
+    html += `<span>Generado por el sistema de agendamiento de exhibidores</span>`
+    html += `<span>${label}</span>`
+    html += `</div>`
+    html += `</div>`
+
+    return html
   }
 
   /**
-   * Exporta el reporte completo (global) a PNG o PDF.
-   * type: 'png' | 'pdf'
+   * Exporta a PNG o PDF usando HTML con estilos inline.
+   * evita el error 'lab()' de html2canvas con Tailwind.
    */
-  const handleExport = async (type: 'png' | 'pdf') => {
-    if (!reportRef.current || !data) return
-    if (type === 'png') setDownloadingPNG(true)
-    else setDownloadingPDF(true)
+  const handleExport = async (type: 'png' | 'pdf', groupId?: string, groupName?: string) => {
+    if (!data) return
+    if (type === 'png') {
+      if (groupId) setExportingGroupPNG(groupId)
+      else setDownloadingPNG(true)
+    } else {
+      if (groupId) setExportingGroupPDF(groupId)
+      else setDownloadingPDF(true)
+    }
     try {
       const html2canvasModule = await import('html2canvas')
       const h2c = html2canvasModule.default ?? html2canvasModule
 
-      // Clonar el nodo para evitar modificar el DOM real
-      const wrapper = document.createElement('div')
-      wrapper.style.position = 'absolute'
-      wrapper.style.left = '-9999px'
-      wrapper.style.top = '0'
-      wrapper.style.zIndex = '-1'
-      wrapper.appendChild(cloneNodeForExport(reportRef.current))
-      document.body.appendChild(wrapper)
+      const mountNode = document.createElement('div')
+      mountNode.style.position = 'fixed'
+      mountNode.style.left = '-10000px'
+      mountNode.style.top = '0'
+      mountNode.style.pointerEvents = 'none'
+      mountNode.innerHTML = buildRankingHtml(groupId)
+      document.body.appendChild(mountNode)
 
-      const canvas = await h2c(wrapper, {
+      const el = (mountNode.firstElementChild as HTMLElement) ?? mountNode
+
+      const canvas = await h2c(el, {
         scale: 3,
         useCORS: true,
         backgroundColor: '#ffffff',
         logging: false,
-        allowTaint: false,
       })
 
-      document.body.removeChild(wrapper)
-      const label = data.monthLabel.toLowerCase().replace(/\s+/g, '-')
+      document.body.removeChild(mountNode)
+
+      const baseName = groupId && groupName
+        ? `ranking-${groupName.toLowerCase().replace(/\s+/g, '-')}`
+        : `ranking-${data.monthLabel.toLowerCase().replace(/\s+/g, '-')}`
 
       if (type === 'png') {
         const a = document.createElement('a')
         a.href = canvas.toDataURL('image/png', 1.0)
-        a.download = `ranking-${label}.png`
+        a.download = `${baseName}.png`
         document.body.appendChild(a)
         a.click()
         a.remove()
@@ -165,14 +260,19 @@ export default function AdminMonthlyRanking() {
           compress: true,
         })
         pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST')
-        pdf.save(`ranking-${label}.pdf`)
+        pdf.save(`${baseName}.pdf`)
       }
     } catch (err) {
       console.error(`Error exportando ${type}:`, err)
       setError(`No se pudo generar el ${type.toUpperCase()}.`)
     } finally {
-      if (type === 'png') setDownloadingPNG(false)
-      else setDownloadingPDF(false)
+      if (type === 'png') {
+        if (groupId) setExportingGroupPNG(null)
+        else setDownloadingPNG(false)
+      } else {
+        if (groupId) setExportingGroupPDF(null)
+        else setDownloadingPDF(false)
+      }
     }
   }
 
@@ -228,16 +328,16 @@ export default function AdminMonthlyRanking() {
         <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 text-sm">❌ {error}</div>
       )}
 
-      {/* ─── Botones de exportación — solo 2 botones globales ─── */}
+      {/* ─── Botones de exportación global ──────────────── */}
       {data && data.totals.totalAssignments > 0 && (
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <button
             onClick={() => handleExport('png')}
             disabled={downloadingPNG}
             className="px-4 py-2 bg-slate-700 text-white text-sm rounded-lg font-medium
                        hover:bg-slate-800 disabled:opacity-50 transition-colors"
           >
-            {downloadingPNG ? 'Generando...' : '⬇️ Descargar PNG'}
+            {downloadingPNG ? 'Generando...' : '⬇️ PNG Global'}
           </button>
           <button
             onClick={() => handleExport('pdf')}
@@ -245,7 +345,7 @@ export default function AdminMonthlyRanking() {
             className="px-4 py-2 bg-rose-600 text-white text-sm rounded-lg font-medium
                        hover:bg-rose-700 disabled:opacity-50 transition-colors"
           >
-            {downloadingPDF ? 'Generando...' : '⬇️ Descargar PDF'}
+            {downloadingPDF ? 'Generando...' : '⬇️ PDF Global'}
           </button>
         </div>
       )}
@@ -277,13 +377,31 @@ export default function AdminMonthlyRanking() {
             if (group.members.length === 0) return null
             return (
               <div key={group.id} className="mb-8">
-                <div className="flex items-center justify-between mb-3">
+                <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
                   <h4 className="font-bold text-indigo-800">
                     👥 {group.name}
                   </h4>
-                  <div className="text-sm text-gray-500">
-                    Capitán: <span className="font-medium text-gray-700">{group.captain_name}</span>
-                    {' · '}Total: <span className="font-bold text-indigo-600">{group.totalAssignments}</span>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <div className="text-sm text-gray-500">
+                      Capitán: <span className="font-medium text-gray-700">{group.captain_name}</span>
+                      {' · '}Total: <span className="font-bold text-indigo-600">{group.totalAssignments}</span>
+                    </div>
+                    <button
+                      onClick={() => handleExport('png', group.id, group.name)}
+                      disabled={exportingGroupPNG === group.id}
+                      className="px-2 py-1 bg-slate-600 text-white text-xs rounded hover:bg-slate-700 disabled:opacity-50 transition-colors"
+                      title="Descargar PNG de este grupo"
+                    >
+                      {exportingGroupPNG === group.id ? '...' : '⬇ PNG'}
+                    </button>
+                    <button
+                      onClick={() => handleExport('pdf', group.id, group.name)}
+                      disabled={exportingGroupPDF === group.id}
+                      className="px-2 py-1 bg-rose-600 text-white text-xs rounded hover:bg-rose-700 disabled:opacity-50 transition-colors"
+                      title="Descargar PDF de este grupo"
+                    >
+                      {exportingGroupPDF === group.id ? '...' : '⬇ PDF'}
+                    </button>
                   </div>
                 </div>
                 <div className="overflow-x-auto">
