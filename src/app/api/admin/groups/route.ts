@@ -74,28 +74,33 @@ export async function POST(req: NextRequest) {
     const { name, captain_id } = body
 
     if (!name?.trim()) return NextResponse.json({ error: 'El nombre es obligatorio.' }, { status: 400 })
-    if (!captain_id) return NextResponse.json({ error: 'El capitán es obligatorio.' }, { status: 400 })
 
     const supabase = createServiceClient()
 
-    // Validar que el capitán existe y pertenece a la congregación
-    const { data: captain } = await supabase
-      .from('users')
-      .select('id, name')
-      .eq('id', captain_id)
-      .eq('congregation_id', admin.congregation_id)
-      .single()
+    // Validar que el capitán existe (si se especifica)
+    if (captain_id) {
+      const { data: captain } = await supabase
+        .from('users')
+        .select('id, name')
+        .eq('id', captain_id)
+        .eq('congregation_id', admin.congregation_id)
+        .single()
 
-    if (!captain) return NextResponse.json({ error: 'El capitán no existe o no pertenece a esta congregación.' }, { status: 400 })
+      if (!captain) return NextResponse.json({ error: 'El capitán no existe o no pertenece a esta congregación.' }, { status: 400 })
+    }
 
     // Crear el grupo
+    const insertData: Record<string, unknown> = {
+      name: name.trim(),
+      congregation_id: admin.congregation_id,
+    }
+    if (captain_id) {
+      insertData.captain_id = captain_id
+    }
+
     const { data: group, error } = await supabase
       .from('user_groups')
-      .insert({
-        name: name.trim(),
-        captain_id,
-        congregation_id: admin.congregation_id,
-      })
+      .insert(insertData)
       .select('id, name, captain_id, congregation_id, created_at')
       .single()
 
@@ -106,17 +111,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 })
     }
 
-    // Asignar el capitán al grupo
-    const { error: updateError } = await supabase
-      .from('users')
-      .update({ group_id: group.id })
-      .eq('id', captain_id)
+    // Asignar el capitán al grupo (solo si se especificó)
+    if (captain_id) {
+      const { error: updateError } = await supabase
+        .from('users')
+        .update({ group_id: group.id })
+        .eq('id', captain_id)
 
-    if (updateError) {
-      return NextResponse.json({ error: 'Grupo creado pero no se pudo asignar al capitán: ' + updateError.message }, { status: 500 })
+      if (updateError) {
+        return NextResponse.json({ error: 'Grupo creado pero no se pudo asignar al capitán: ' + updateError.message }, { status: 500 })
+      }
     }
 
-    return NextResponse.json({ group: { ...group, member_count: 1 } }, { status: 201 })
+    return NextResponse.json({ group: { ...group, member_count: captain_id ? 1 : 0 } }, { status: 201 })
   } catch {
     return NextResponse.json({ error: 'Error al procesar la solicitud.' }, { status: 400 })
   }

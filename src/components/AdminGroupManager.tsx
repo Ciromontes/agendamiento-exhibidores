@@ -112,7 +112,6 @@ export default function AdminGroupManager() {
         body,
       })
     } else {
-      if (!formCaptain) { setError('Debes seleccionar un capitán.'); setSaving(false); return }
       res = await fetch('/api/admin/groups', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-access-key': accessKey },
@@ -242,8 +241,9 @@ export default function AdminGroupManager() {
                   <div>
                     <h3 className="font-semibold text-gray-800">{group.name}</h3>
                     <p className="text-sm text-gray-500">
-                      Capitán: <span className="font-medium text-gray-700">{group.captain_name}</span>
-                      {' · '}
+                      {group.captain_name
+                        ? <>Capitán: <span className="font-medium text-gray-700">{group.captain_name}</span> · </>
+                        : ''}
                       <span className="text-indigo-600 font-medium">{group.member_count}</span> miembro(s)
                     </p>
                   </div>
