@@ -20,6 +20,6 @@ import { createBrowserClient } from '@supabase/ssr'
 
 export const createClient = () =>
   createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,      // URL del proyecto Supabase
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!   // Clave anónima (pública, segura para el navegador)
+    process.env.NEXT_PUBLIC_SUPABASE_URL!.trim(),      // URL del proyecto Supabase
+    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!.trim()   // Clave anónima (pública, segura para el navegador)
   )
