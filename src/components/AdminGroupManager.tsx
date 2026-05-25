@@ -9,7 +9,7 @@
  */
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useUser } from '@/context/UserContext'
 import type { User, UserGroup } from '@/types'
@@ -42,6 +42,16 @@ export default function AdminGroupManager() {
   const [members, setMembers] = useState<MemberRow[]>([])
   const [addingMember, setAddingMember] = useState(false)
   const [selectedUserId, setSelectedUserId] = useState('')
+
+  // ─── Estado para Excel ──────────────────────────────────────
+  const [downloadingExcel, setDownloadingExcel] = useState(false)
+  const [uploadingExcel, setUploadingExcel] = useState(false)
+  const [excelResult, setExcelResult] = useState<{
+    ok: boolean
+    message?: string
+    errors?: string[]
+  } | null>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   // ─── Cargar datos ─────────────────────────────────────────
   const loadGroups = useCallback(async () => {
@@ -125,6 +135,52 @@ export default function AdminGroupManager() {
     setSaving(false)
   }
 
+  // ─── Descargar Excel de grupos ────────────────────────────
+  const handleDownloadExcel = async () => {
+    setDownloadingExcel(true)
+    const res = await fetch('/api/admin/groups/excel', {
+      headers: { 'x-access-key': accessKey },
+    })
+    if (res.ok) {
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = 'grupos.xlsx'
+      document.body.appendChild(a)
+      a.click()
+      a.remove()
+      URL.revokeObjectURL(url)
+    } else {
+      const json = await res.json()
+      alert(json.error ?? 'Error al descargar.')
+    }
+    setDownloadingExcel(false)
+  }
+
+  // ─── Subir Excel de grupos ─────────────────────────────────
+  const handleUploadExcel = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploadingExcel(true)
+    setExcelResult(null)
+    const formData = new FormData()
+    formData.append('file', file)
+    const res = await fetch('/api/admin/groups/excel', {
+      method: 'POST',
+      headers: { 'x-access-key': accessKey },
+      body: formData,
+    })
+    const json = await res.json()
+    setExcelResult(json)
+    if (res.ok || res.status === 422) {
+      await loadGroups()
+      await loadUsers()
+    }
+    setUploadingExcel(false)
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
+
   // ─── Eliminar grupo ────────────────────────────────────────
   const handleDelete = async (groupId: string) => {
     if (!confirm('¿Eliminar este grupo? Los miembros quedarán sin grupo.')) return
@@ -204,6 +260,49 @@ export default function AdminGroupManager() {
           + Nuevo Grupo
         </button>
       </div>
+
+      {/* ─── Botones Excel ───────────────────────────────── */}
+      <div className="flex gap-2">
+        <button
+          onClick={handleDownloadExcel}
+          disabled={downloadingExcel}
+          className="px-4 py-2 bg-emerald-600 text-white text-sm rounded-lg font-medium
+                     hover:bg-emerald-700 disabled:opacity-50 transition-colors"
+        >
+          {downloadingExcel ? 'Descargando...' : '⬇️ Descargar grupos.xlsx'}
+        </button>
+        <label
+          className={`px-4 py-2 text-sm rounded-lg font-medium cursor-pointer transition-colors ${
+            uploadingExcel
+              ? 'bg-gray-300 text-gray-500 cursor-wait'
+              : 'bg-blue-600 text-white hover:bg-blue-700'
+          }`}
+        >
+          {uploadingExcel ? 'Subiendo...' : '⬆️ Subir grupos.xlsx'}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".xlsx,.xls"
+            onChange={handleUploadExcel}
+            disabled={uploadingExcel}
+            className="hidden"
+          />
+        </label>
+      </div>
+
+      {excelResult && (
+        <div className={`rounded-lg p-4 text-sm ${
+          excelResult.ok ? 'bg-green-50 border border-green-200 text-green-700' :
+          'bg-red-50 border border-red-200 text-red-700'
+        }`}>
+          {excelResult.ok ? '✅ ' : '❌ '}{excelResult.message}
+          {excelResult.errors && excelResult.errors.length > 0 && (
+            <ul className="mt-2 list-disc pl-5">
+              {excelResult.errors.map((err, i) => <li key={i}>{err}</li>)}
+            </ul>
+          )}
+        </div>
+      )}
 
       {error && (
         <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 text-sm">
