@@ -1,8 +1,8 @@
 /**
- * components/AdminGroupManager.tsx — V5: Gestión de Grupos y Capitanes
+ * components/AdminGroupManager.tsx — V5: Gestión de Grupos
  * ─────────────────────────────────────────────────────────────
- * Permite al admin crear, editar y eliminar grupos de publicadores.
- * Cada grupo tiene un capitán y miembros (usuarios).
+ * Permite al admin crear, editar y eliminar grupos de publicadores
+ * y gestionar sus miembros (usuarios).
  *
  * V5: Iteración 2 del sistema de Ranking por Grupos.
  * ─────────────────────────────────────────────────────────────
@@ -35,7 +35,6 @@ export default function AdminGroupManager() {
   const [showModal, setShowModal] = useState(false)
   const [editingGroup, setEditingGroup] = useState<GroupRow | null>(null)
   const [formName, setFormName] = useState('')
-  const [formCaptain, setFormCaptain] = useState('')
   const [saving, setSaving] = useState(false)
 
   // ─── Estado del panel de miembros ─────────────────────────
@@ -81,7 +80,6 @@ export default function AdminGroupManager() {
   const handleCreate = () => {
     setEditingGroup(null)
     setFormName('')
-    setFormCaptain('')
     setShowModal(true)
   }
 
@@ -89,7 +87,6 @@ export default function AdminGroupManager() {
   const handleEdit = (group: GroupRow) => {
     setEditingGroup(group)
     setFormName(group.name)
-    setFormCaptain(group.captain_id)
     setShowModal(true)
   }
 
@@ -101,7 +98,6 @@ export default function AdminGroupManager() {
 
     const body = JSON.stringify({
       name: formName.trim(),
-      captain_id: formCaptain || undefined,
     })
 
     let res: Response
@@ -194,10 +190,10 @@ export default function AdminGroupManager() {
       <div className="flex items-center justify-between">
         <div>
           <h2 className="text-xl font-bold text-gray-800">
-            👥 Grupos y Capitanes
+            👥 Grupos
           </h2>
           <p className="text-sm text-gray-500 mt-1">
-            Gestiona los grupos de publicadores y sus capitanes para el ranking mensual.
+            Gestiona los grupos de publicadores para el ranking mensual.
           </p>
         </div>
         <button
@@ -241,9 +237,6 @@ export default function AdminGroupManager() {
                   <div>
                     <h3 className="font-semibold text-gray-800">{group.name}</h3>
                     <p className="text-sm text-gray-500">
-                      {group.captain_name
-                        ? <>Capitán: <span className="font-medium text-gray-700">{group.captain_name}</span> · </>
-                        : ''}
                       <span className="text-indigo-600 font-medium">{group.member_count}</span> miembro(s)
                     </p>
                   </div>
@@ -347,22 +340,6 @@ export default function AdminGroupManager() {
                 placeholder="Ej: Grupo Torres"
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
               />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Capitán
-              </label>
-              <select
-                value={formCaptain}
-                onChange={(e) => setFormCaptain(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-              >
-                <option value="">Seleccionar capitán...</option>
-                {users.map((u) => (
-                  <option key={u.id} value={u.id}>{u.name}</option>
-                ))}
-              </select>
             </div>
 
             <div className="flex gap-3 justify-end pt-2">
