@@ -65,15 +65,6 @@ const CONGREGATION_ID   = 'cf2678ea-91a7-4a05-8ac3-fbcc98f37280'; // terranova
 const WEEKS             = 12;
 // Archivo local donde se guardan los IDs insertados (para poder limpiarlos).
 const STATE_FILE        = path.resolve(__dirname, 'sim-state.json');
-const ABSENCE_PROB      = 0.15;  // 15 % de ausencia por usuario/semana
-const RELIEF_PROB       = 0.10;  // 10 % de reservas generan solicitud de relevo
-
-// Límites semanales de turnos por tipo de usuario
-const WEEKLY_LIMIT = {
-  publicador:        1,
-  precursor_regular: 2,
-  precursor_auxiliar: 2,
-};
 
 // ── Utilidades ──────────────────────────────────────────────────────────────
 
@@ -251,7 +242,7 @@ async function simulate() {
   console.log(`  Rango:  ${weeks[0]}  →  ${weeks[WEEKS - 1]}`);
   console.log(`  Semana activa post-simulación: ${fmt(thisMonday)}\n`);
 
-  // ── 4. Simular cada semana ──────────────────────────────────────────────
+  // ── 5. Simular cada semana ──────────────────────────────────────────────
   let totalReservations = 0;
   let totalRelief       = 0;
   const userCounter     = {}; // userId → count, para el resumen final
@@ -260,57 +251,61 @@ async function simulate() {
   for (const weekStart of weeks) {
     process.stdout.write(`  ${weekStart}: `);
 
-    // Estado de ocupación: slotOccupancy[id] = { 1: {userId,gender}|null, 2: ... }
+    // ── 5a. Borrar reservas existentes para esta semana/congregación ──────
+    const { error: delErr } = await supabase
+      .from('reservations')
+      .delete()
+      .eq('week_start', weekStart)
+      .eq('congregation_id', CONGREGATION_ID);
+
+    if (delErr) {
+      console.error(`\n  ❌  Error borrando reservas previas en ${weekStart}:`, delErr.message);
+      continue;
+    }
+
+    // ── 5b. Construir asignaciones ────────────────────────────────────────
+    // Round-robin POR SLOT: cada slot asigna usuarios distintos rotando
+    // equitativamente. Así los 80+ usuarios reciben ~2 asignaciones c/u.
     const slotOccupancy = {};
     for (const s of slots) slotOccupancy[s.id] = { 1: null, 2: null };
 
     const toInsert = []; // reservas de esta semana
+    const userPool = shuffle([...users]); // copia mezclada, se recorre en círculo
+    let userIdx = 0;
 
-    // Procesar usuarios en orden aleatorio para evitar sesgo
-    for (const user of shuffle(users)) {
-      // ¿Ausente esta semana?
-      if (Math.random() < ABSENCE_PROB) continue;
+    for (const slot of shuffle(slots)) {
+      const occ = slotOccupancy[slot.id];
 
-      const limit = WEEKLY_LIMIT[user.user_type] ?? 1;
-      let   assigned = 0;
+      for (let pos = 1; pos <= 2; pos++) {
+        // Buscar el siguiente usuario compatible que no esté ya en este slot
+        let attempts = 0;
+        while (attempts < userPool.length) {
+          const candidate = userPool[userIdx % userPool.length];
+          userIdx++;
+          attempts++;
 
-      // Slots disponibles y aleatorios para este usuario
-      const eligibleSlots = shuffle(slots).filter(slot => {
-        const occ = slotOccupancy[slot.id];
+          // ¿Ya está en alguna posición de este slot?
+          if (occ[1]?.userId === candidate.id) continue;
+          if (occ[2]?.userId === candidate.id) continue;
 
-        // ¿Hay alguna posición libre?
-        const pos1Free = occ[1] === null;
-        const pos2Free = occ[2] === null;
-        if (!pos1Free && !pos2Free) return false; // slot lleno
+          // Si pos=2 y pos1 ocupado, verificar compatibilidad de género
+          if (pos === 2 && occ[1] !== null) {
+            const takenGender = occ[1].gender;
+            if (takenGender && candidate.gender && takenGender !== candidate.gender) continue;
+          }
 
-        // Si pos1 está tomada, verificar compatibilidad de género con pos2
-        if (!pos1Free && pos2Free) {
-          const takenGender = occ[1].gender;
-          // Solo bloquear si AMBOS tienen género definido y son distintos
-          if (takenGender && user.gender && takenGender !== user.gender) return false;
+          // Asignar
+          occ[pos] = { userId: candidate.id, gender: candidate.gender };
+          toInsert.push({
+            time_slot_id:    slot.id,
+            user_id:         candidate.id,
+            week_start:      weekStart,
+            status:          'confirmed',
+            slot_position:   pos,
+            congregation_id: CONGREGATION_ID,
+          });
+          break;
         }
-        return true;
-      });
-
-      for (const slot of eligibleSlots) {
-        if (assigned >= limit) break;
-
-        const occ      = slotOccupancy[slot.id];
-        const position = occ[1] === null ? 1 : 2;
-
-        // Marcar ocupado
-        occ[position] = { userId: user.id, gender: user.gender };
-
-        toInsert.push({
-          time_slot_id:    slot.id,
-          user_id:         user.id,
-          week_start:      weekStart,
-          status:          'confirmed',
-          slot_position:   position,
-          congregation_id: CONGREGATION_ID,
-        });
-
-        assigned++;
       }
     }
 
@@ -319,7 +314,7 @@ async function simulate() {
       continue;
     }
 
-    // ── 4a. Insertar reservas ─────────────────────────────────────────────
+    // ── 5c. Insertar reservas ─────────────────────────────────────────────
     const { data: inserted, error: insErr } = await supabase
       .from('reservations')
       .insert(toInsert)
@@ -337,7 +332,8 @@ async function simulate() {
       allInsertedIds.push(res.id);
     }
 
-    // ── 4b. Generar solicitudes de relevo (≈10 %) ─────────────────────────
+    // ── 5d. Generar solicitudes de relevo (≈10 %) ─────────────────────────
+    const RELIEF_PROB = 0.10;
     const reliefCandidates = shuffle(inserted)
       .slice(0, Math.max(1, Math.round(inserted.length * RELIEF_PROB)));
 
@@ -383,7 +379,7 @@ async function simulate() {
     console.log(`${inserted.length} reservas  |  ${reliefRows.length} relevos`);
   }
 
-  // ── 5. Actualizar active_week_start ─────────────────────────────────────
+  // ── 6. Actualizar active_week_start ─────────────────────────────────────
   const { error: cfgErr } = await supabase
     .from('app_config')
     .update({ active_week_start: fmt(thisMonday) })
@@ -395,7 +391,7 @@ async function simulate() {
     console.log(`\n  ✓ active_week_start actualizado → ${fmt(thisMonday)}`);
   }
 
-  // ── 6. Guardar estado en sim-state.json (necesario para --cleanup) ────────
+  // ── 7. Guardar estado en sim-state.json (necesario para --cleanup) ────────
   fs.writeFileSync(STATE_FILE, JSON.stringify({
     simulatedAt:    new Date().toISOString(),
     congregationId: CONGREGATION_ID,
@@ -404,7 +400,7 @@ async function simulate() {
   }, null, 2));
   console.log(`\n  ✓ sim-state.json guardado (${allInsertedIds.length} IDs)`);
 
-  // ── 7. Resumen ───────────────────────────────────────────────────────────
+  // ── 8. Resumen ───────────────────────────────────────────────────────────
   const top5 = Object.entries(userCounter)
     .sort(([, a], [, b]) => b - a)
     .slice(0, 5);
