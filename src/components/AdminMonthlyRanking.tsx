@@ -61,8 +61,6 @@ export default function AdminMonthlyRanking() {
   const [error, setError] = useState('')
   const [downloadingPNG, setDownloadingPNG] = useState(false)
   const [downloadingPDF, setDownloadingPDF] = useState(false)
-  const [exportingGroupPNG, setExportingGroupPNG] = useState<string | null>(null)
-  const [exportingGroupPDF, setExportingGroupPDF] = useState<string | null>(null)
   const reportRef = useRef<HTMLDivElement>(null)
 
   const loadRanking = useCallback(async () => {
@@ -90,131 +88,91 @@ export default function AdminMonthlyRanking() {
   // ─── Generar columnas de exhibidores ─────────────────────
   const allExhibitors = data?.totals.allExhibitors ?? []
 
-  // ─── Exportar a PNG ───────────────────────────────────────
-  const handleExportPNG = async () => {
-    if (!reportRef.current) return
-    setDownloadingPNG(true)
-    try {
-      const html2canvasModule = await import('html2canvas')
-      const html2canvas = html2canvasModule.default ?? html2canvasModule
-      const canvas = await html2canvas(reportRef.current, {
-        scale: 3,
-        useCORS: true,
-        backgroundColor: '#ffffff',
-        logging: false,
-      })
-      const a = document.createElement('a')
-      a.href = canvas.toDataURL('image/png', 1.0)
-      a.download = `ranking-${data?.monthLabel?.replace(/\s+/g, '-').toLowerCase()}.png`
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-    } catch (err) {
-      console.error('Error exportando PNG:', err)
-      setError('No se pudo generar el PNG.')
-    } finally {
-      setDownloadingPNG(false)
-    }
+  /**
+   * Clona un nodo DOM y reemplaza funciones de color no soportadas
+   * por html2canvas (ej: lab(), oklch()) por colores sólidos.
+   */
+  function cloneNodeForExport(el: HTMLElement): HTMLElement {
+    const clone = el.cloneNode(true) as HTMLElement
+    // Recorrer todos los elementos del clon y limpiar estilos problemáticos
+    const all = clone.querySelectorAll('*')
+    all.forEach((node) => {
+      const htmlNode = node as HTMLElement
+      const style = htmlNode.style
+      // Reemplazar funciones de color no soportadas
+      if (style.color && style.color.includes('lab(')) style.color = '#374151'
+      if (style.backgroundColor && style.backgroundColor.includes('lab(')) style.backgroundColor = '#ffffff'
+      if (style.borderColor && style.borderColor.includes('lab(')) style.borderColor = '#e5e7eb'
+      // Forzar color de texto oscuro
+      if (!style.color || style.color === 'inherit' || style.color === '') style.color = '#374151'
+    })
+    // Asegurar fondo blanco en el contenedor
+    clone.style.backgroundColor = '#ffffff'
+    clone.style.color = '#374151'
+    // Ocultar temporalmente cualquier elemento con position fixed/absolute
+    // que pueda interferir (botones de exportación, etc.)
+    return clone
   }
 
-  // ─── Exportar a PDF ───────────────────────────────────────
-  const handleExportPDF = async () => {
-    if (!reportRef.current) return
-    setDownloadingPDF(true)
+  /**
+   * Exporta el reporte completo (global) a PNG o PDF.
+   * type: 'png' | 'pdf'
+   */
+  const handleExport = async (type: 'png' | 'pdf') => {
+    if (!reportRef.current || !data) return
+    if (type === 'png') setDownloadingPNG(true)
+    else setDownloadingPDF(true)
     try {
       const html2canvasModule = await import('html2canvas')
-      const html2canvas = html2canvasModule.default ?? html2canvasModule
-      const { jsPDF } = await import('jspdf')
+      const h2c = html2canvasModule.default ?? html2canvasModule
 
-      const canvas = await html2canvas(reportRef.current, {
+      // Clonar el nodo para evitar modificar el DOM real
+      const wrapper = document.createElement('div')
+      wrapper.style.position = 'absolute'
+      wrapper.style.left = '-9999px'
+      wrapper.style.top = '0'
+      wrapper.style.zIndex = '-1'
+      wrapper.appendChild(cloneNodeForExport(reportRef.current))
+      document.body.appendChild(wrapper)
+
+      const canvas = await h2c(wrapper, {
         scale: 3,
         useCORS: true,
         backgroundColor: '#ffffff',
         logging: false,
+        allowTaint: false,
       })
 
-      const pxToPt = 72 / 96
-      const pdfWidth = canvas.width * pxToPt
-      const pdfHeight = canvas.height * pxToPt
+      document.body.removeChild(wrapper)
+      const label = data.monthLabel.toLowerCase().replace(/\s+/g, '-')
 
-      const pdf = new jsPDF({
-        orientation: pdfWidth >= pdfHeight ? 'landscape' : 'portrait',
-        unit: 'pt',
-        format: [pdfWidth, pdfHeight],
-        compress: true,
-      })
-
-      pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST')
-      pdf.save(`ranking-${data?.monthLabel?.replace(/\s+/g, '-').toLowerCase()}.pdf`)
+      if (type === 'png') {
+        const a = document.createElement('a')
+        a.href = canvas.toDataURL('image/png', 1.0)
+        a.download = `ranking-${label}.png`
+        document.body.appendChild(a)
+        a.click()
+        a.remove()
+      } else {
+        const { jsPDF } = await import('jspdf')
+        const pxToPt = 72 / 96
+        const pdfWidth = canvas.width * pxToPt
+        const pdfHeight = canvas.height * pxToPt
+        const pdf = new jsPDF({
+          orientation: pdfWidth >= pdfHeight ? 'landscape' : 'portrait',
+          unit: 'pt',
+          format: [pdfWidth, pdfHeight],
+          compress: true,
+        })
+        pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST')
+        pdf.save(`ranking-${label}.pdf`)
+      }
     } catch (err) {
-      console.error('Error exportando PDF:', err)
-      setError('No se pudo generar el PDF.')
+      console.error(`Error exportando ${type}:`, err)
+      setError(`No se pudo generar el ${type.toUpperCase()}.`)
     } finally {
-      setDownloadingPDF(false)
-    }
-  }
-
-  // ─── Exportar un grupo específico a PNG ───────────────────
-  const handleExportGroupPNG = async (groupId: string, groupName: string) => {
-    const el = document.getElementById(`group-section-${groupId}`)
-    if (!el) return
-    setExportingGroupPNG(groupId)
-    try {
-      const html2canvasModule = await import('html2canvas')
-      const html2canvas = html2canvasModule.default ?? html2canvasModule
-      const canvas = await html2canvas(el, {
-        scale: 3,
-        useCORS: true,
-        backgroundColor: '#ffffff',
-        logging: false,
-      })
-      const a = document.createElement('a')
-      a.href = canvas.toDataURL('image/png', 1.0)
-      a.download = `ranking-${groupName.toLowerCase().replace(/\s+/g, '-')}.png`
-      document.body.appendChild(a)
-      a.click()
-      a.remove()
-    } catch (err) {
-      console.error('Error exportando grupo PNG:', err)
-    } finally {
-      setExportingGroupPNG(null)
-    }
-  }
-
-  // ─── Exportar un grupo específico a PDF ───────────────────
-  const handleExportGroupPDF = async (groupId: string, groupName: string) => {
-    const el = document.getElementById(`group-section-${groupId}`)
-    if (!el) return
-    setExportingGroupPDF(groupId)
-    try {
-      const html2canvasModule = await import('html2canvas')
-      const html2canvas = html2canvasModule.default ?? html2canvasModule
-      const { jsPDF } = await import('jspdf')
-
-      const canvas = await html2canvas(el, {
-        scale: 3,
-        useCORS: true,
-        backgroundColor: '#ffffff',
-        logging: false,
-      })
-
-      const pxToPt = 72 / 96
-      const pdfWidth = canvas.width * pxToPt
-      const pdfHeight = canvas.height * pxToPt
-
-      const pdf = new jsPDF({
-        orientation: pdfWidth >= pdfHeight ? 'landscape' : 'portrait',
-        unit: 'pt',
-        format: [pdfWidth, pdfHeight],
-        compress: true,
-      })
-
-      pdf.addImage(canvas.toDataURL('image/png'), 'PNG', 0, 0, pdfWidth, pdfHeight, undefined, 'FAST')
-      pdf.save(`ranking-${groupName.toLowerCase().replace(/\s+/g, '-')}.pdf`)
-    } catch (err) {
-      console.error('Error exportando grupo PDF:', err)
-    } finally {
-      setExportingGroupPDF(null)
+      if (type === 'png') setDownloadingPNG(false)
+      else setDownloadingPDF(false)
     }
   }
 
@@ -270,11 +228,11 @@ export default function AdminMonthlyRanking() {
         <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 text-sm">❌ {error}</div>
       )}
 
-      {/* ─── Botones de exportación ───────────────────────── */}
+      {/* ─── Botones de exportación — solo 2 botones globales ─── */}
       {data && data.totals.totalAssignments > 0 && (
         <div className="flex gap-2">
           <button
-            onClick={handleExportPNG}
+            onClick={() => handleExport('png')}
             disabled={downloadingPNG}
             className="px-4 py-2 bg-slate-700 text-white text-sm rounded-lg font-medium
                        hover:bg-slate-800 disabled:opacity-50 transition-colors"
@@ -282,7 +240,7 @@ export default function AdminMonthlyRanking() {
             {downloadingPNG ? 'Generando...' : '⬇️ Descargar PNG'}
           </button>
           <button
-            onClick={handleExportPDF}
+            onClick={() => handleExport('pdf')}
             disabled={downloadingPDF}
             className="px-4 py-2 bg-rose-600 text-white text-sm rounded-lg font-medium
                        hover:bg-rose-700 disabled:opacity-50 transition-colors"
@@ -291,30 +249,6 @@ export default function AdminMonthlyRanking() {
           </button>
         </div>
       )}
-
-      {/* ─── Exportar por grupo ─────────────────────────────────── */}
-      {data?.groups.map((group) => (
-        <button
-          key={group.id}
-          onClick={() => handleExportGroupPNG(group.id, group.name)}
-          disabled={exportingGroupPNG === group.id}
-          className="px-4 py-2 bg-slate-700 text-white text-sm rounded-lg font-medium
-                       hover:bg-slate-800 disabled:opacity-50 transition-colors"
-        >
-          {exportingGroupPNG === group.id ? 'Generando...' : '⬇️ Descargar PNG por grupo'}
-        </button>
-      ))}
-      {data?.groups.map((group) => (
-        <button
-          key={group.id}
-          onClick={() => handleExportGroupPDF(group.id, group.name)}
-          disabled={exportingGroupPDF === group.id}
-          className="px-4 py-2 bg-rose-600 text-white text-sm rounded-lg font-medium
-                       hover:bg-rose-700 disabled:opacity-50 transition-colors"
-        >
-          {exportingGroupPDF === group.id ? 'Generando...' : '⬇️ Descargar PDF por grupo'}
-        </button>
-      ))}
 
       {/* ─── Tabla de ranking (referencia para export) ────── */}
       {loading ? (
@@ -342,35 +276,16 @@ export default function AdminMonthlyRanking() {
           {data.groups.map((group) => {
             if (group.members.length === 0) return null
             return (
-              <div key={group.id} id={`group-section-${group.id}`} className="mb-8">
+              <div key={group.id} className="mb-8">
                 <div className="flex items-center justify-between mb-3">
                   <h4 className="font-bold text-indigo-800">
                     👥 {group.name}
                   </h4>
-                  <div className="flex items-center gap-2">
-                    <div className="text-sm text-gray-500 mr-2">
-                      Capitán: <span className="font-medium text-gray-700">{group.captain_name}</span>
-                      {' · '}Total: <span className="font-bold text-indigo-600">{group.totalAssignments}</span>
-                    </div>
-                    <button
-                      onClick={() => handleExportGroupPNG(group.id, group.name)}
-                      disabled={exportingGroupPNG === group.id}
-                      className="px-2 py-1 bg-slate-600 text-white text-xs rounded hover:bg-slate-700 disabled:opacity-50 transition-colors"
-                      title="Descargar PNG de este grupo"
-                    >
-                      {exportingGroupPNG === group.id ? '...' : '⬇ PNG'}
-                    </button>
-                    <button
-                      onClick={() => handleExportGroupPDF(group.id, group.name)}
-                      disabled={exportingGroupPDF === group.id}
-                      className="px-2 py-1 bg-rose-600 text-white text-xs rounded hover:bg-rose-700 disabled:opacity-50 transition-colors"
-                      title="Descargar PDF de este grupo"
-                    >
-                      {exportingGroupPDF === group.id ? '...' : '⬇ PDF'}
-                    </button>
+                  <div className="text-sm text-gray-500">
+                    Capitán: <span className="font-medium text-gray-700">{group.captain_name}</span>
+                    {' · '}Total: <span className="font-bold text-indigo-600">{group.totalAssignments}</span>
                   </div>
                 </div>
-
                 <div className="overflow-x-auto">
                   <table className="w-full border-collapse text-sm" style={{ minWidth: '600px' }}>
                     <thead>
