@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
   const supabase = createServiceClient()
   const { data, error } = await supabase
     .from('users')
-    .select('*')
+    .select('id, name, user_type, gender, is_admin, is_active, access_key, phone, congregation_id, group_id, created_at')
     .eq('congregation_id', admin.congregation_id)
     .order('name', { ascending: true })
 

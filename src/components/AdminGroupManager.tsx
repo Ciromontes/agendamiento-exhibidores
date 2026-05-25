@@ -19,7 +19,7 @@ type GroupRow = UserGroup & {
   member_count: number
 }
 
-type MemberRow = Pick<User, 'id' | 'name' | 'user_type' | 'gender'>
+type MemberRow = Pick<User, 'id' | 'name' | 'user_type' | 'gender' | 'group_id'>
 
 export default function AdminGroupManager() {
   const supabase = createClient()
@@ -27,7 +27,7 @@ export default function AdminGroupManager() {
   const accessKey = user?.access_key ?? ''
 
   const [groups, setGroups] = useState<GroupRow[]>([])
-  const [users, setUsers] = useState<Pick<User, 'id' | 'name'>[]>([])
+  const [users, setUsers] = useState<Pick<User, 'id' | 'name' | 'group_id'>[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -41,7 +41,7 @@ export default function AdminGroupManager() {
   const [expandedGroup, setExpandedGroup] = useState<string | null>(null)
   const [members, setMembers] = useState<MemberRow[]>([])
   const [addingMember, setAddingMember] = useState(false)
-  const [selectedUserId, setSelectedUserId] = useState('')
+  const [selectedUserIds, setSelectedUserIds] = useState<Set<string>>(new Set())
 
   // ─── Estado para Excel ──────────────────────────────────────
   const [downloadingExcel, setDownloadingExcel] = useState(false)
@@ -200,28 +200,43 @@ export default function AdminGroupManager() {
       setExpandedGroup(null)
     } else {
       setExpandedGroup(groupId)
+      setSelectedUserIds(new Set())
       await loadMembers(groupId)
     }
   }
 
-  // ─── Agregar miembro ──────────────────────────────────────
-  const handleAddMember = async () => {
-    if (!selectedUserId || !expandedGroup) return
+  // ─── Agregar miembro(s) ─────────────────────────────────
+  const handleAddSelectedMembers = async () => {
+    if (selectedUserIds.size === 0 || !expandedGroup) return
     setAddingMember(true)
-    const res = await fetch(`/api/admin/groups/${expandedGroup}/members`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-access-key': accessKey },
-      body: JSON.stringify({ user_id: selectedUserId }),
-    })
-    const json = await res.json()
-    if (!res.ok) {
-      alert(json.error ?? 'Error al agregar miembro.')
-    } else {
-      setSelectedUserId('')
-      await loadMembers(expandedGroup)
-      await loadGroups()
+    let hasError = false
+    for (const userId of selectedUserIds) {
+      const res = await fetch(`/api/admin/groups/${expandedGroup}/members`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-access-key': accessKey },
+        body: JSON.stringify({ user_id: userId }),
+      })
+      if (!res.ok) {
+        const json = await res.json()
+        console.error(`Error al agregar usuario ${userId}:`, json.error)
+        hasError = true
+      }
     }
+    setSelectedUserIds(new Set())
+    await loadMembers(expandedGroup)
+    await loadGroups()
     setAddingMember(false)
+    if (hasError) alert('Algunos usuarios no pudieron ser agregados. Revisa la consola.')
+  }
+
+  // ─── Toggle selección de usuario ────────────────────────
+  const toggleUserSelection = (userId: string) => {
+    setSelectedUserIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(userId)) next.delete(userId)
+      else next.add(userId)
+      return next
+    })
   }
 
   // ─── Quitar miembro ───────────────────────────────────────
@@ -238,9 +253,14 @@ export default function AdminGroupManager() {
   }
 
   // ─── Calcular usuarios disponibles para agregar ────────────
-  const availableUsers = users.filter(
-    (u) => !members.some((m) => m.id === u.id),
-  )
+  // Excluye: miembros del grupo actual + usuarios asignados a OTRO grupo
+  const availableUsers = users.filter((u) => {
+    // Ya es miembro del grupo actual
+    if (members.some((m) => m.id === u.id)) return false
+    // Ya está asignado a otro grupo (distinto del expandido)
+    if (u.group_id && u.group_id !== expandedGroup) return false
+    return true
+  })
 
   // ─── Render ────────────────────────────────────────────────
   return (
@@ -362,60 +382,84 @@ export default function AdminGroupManager() {
               {/* Panel de miembros (expandible) */}
               {expandedGroup === group.id && (
                 <div className="border-t border-gray-100 p-4 bg-gray-50 rounded-b-xl">
-                  {/* Agregar miembro */}
-                  <div className="flex gap-2 mb-4">
-                    <select
-                      value={selectedUserId}
-                      onChange={(e) => setSelectedUserId(e.target.value)}
-                      className="flex-1 px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
-                    >
-                      <option value="">Seleccionar usuario...</option>
-                      {availableUsers.map((u) => (
-                        <option key={u.id} value={u.id}>{u.name}</option>
-                      ))}
-                    </select>
-                    <button
-                      onClick={handleAddMember}
-                      disabled={!selectedUserId || addingMember}
-                      className="px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg font-medium
-                                 hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-                    >
-                      {addingMember ? '...' : 'Agregar'}
-                    </button>
-                  </div>
-
-                  {/* Lista de miembros */}
-                  {members.length === 0 ? (
-                    <p className="text-sm text-gray-400 text-center py-4">
-                      Sin miembros en este grupo.
-                    </p>
-                  ) : (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                      {members.map((m) => (
-                        <div
-                          key={m.id}
-                          className="flex items-center justify-between bg-white border border-gray-200 rounded-lg px-3 py-2"
-                        >
-                          <div>
-                            <span className="text-sm font-medium text-gray-700">{m.name}</span>
-                            <span className="text-xs text-gray-400 ml-2">
-                              {m.user_type === 'precursor_regular' ? 'PR' : m.user_type === 'precursor_auxiliar' ? 'PA' : 'Pub'}
-                            </span>
-                            {group.captain_id === m.id && (
-                              <span className="text-xs text-amber-600 ml-1">⭐</span>
-                            )}
-                          </div>
-                          <button
-                            onClick={() => handleRemoveMember(m.id)}
-                            className="text-red-400 hover:text-red-600 text-sm transition-colors"
-                            title="Quitar del grupo"
+                  {/* Agregar miembro(s) — checkboxes múltiples */}
+                  {availableUsers.length > 0 && (
+                    <div className="mb-4">
+                      <p className="text-sm font-medium text-gray-600 mb-2">
+                        Usuarios disponibles ({availableUsers.length})
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 max-h-48 overflow-y-auto mb-3">
+                        {availableUsers.map((u) => (
+                          <label
+                            key={u.id}
+                            className="flex items-center gap-2 px-3 py-2 bg-white border border-gray-200 rounded-lg cursor-pointer hover:bg-indigo-50 transition-colors"
                           >
-                            ✕
-                          </button>
-                        </div>
-                      ))}
+                            <input
+                              type="checkbox"
+                              checked={selectedUserIds.has(u.id)}
+                              onChange={() => toggleUserSelection(u.id)}
+                              className="accent-indigo-600"
+                            />
+                            <span className="text-sm text-gray-700">{u.name}</span>
+                          </label>
+                        ))}
+                      </div>
+                      <button
+                        onClick={handleAddSelectedMembers}
+                        disabled={selectedUserIds.size === 0 || addingMember}
+                        className="px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg font-medium
+                                   hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+                      >
+                        {addingMember
+                          ? 'Agregando...'
+                          : `Agregar seleccionados (${selectedUserIds.size})`}
+                      </button>
                     </div>
                   )}
+
+                  {availableUsers.length === 0 && (
+                    <p className="text-sm text-gray-400 text-center py-2 mb-3">
+                      Todos los usuarios ya están asignados a un grupo.
+                    </p>
+                  )}
+
+                  {/* Lista de miembros actuales */}
+                  <div className="border-t border-gray-200 pt-3 mt-2">
+                    <p className="text-sm font-medium text-gray-600 mb-2">
+                      Miembros ({members.length})
+                    </p>
+                    {members.length === 0 ? (
+                      <p className="text-sm text-gray-400 text-center py-4">
+                        Sin miembros en este grupo.
+                      </p>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                        {members.map((m) => (
+                          <div
+                            key={m.id}
+                            className="flex items-center justify-between bg-white border border-gray-200 rounded-lg px-3 py-2"
+                          >
+                            <div>
+                              <span className="text-sm font-medium text-gray-700">{m.name}</span>
+                              <span className="text-xs text-gray-400 ml-2">
+                                {m.user_type === 'precursor_regular' ? 'PR' : m.user_type === 'precursor_auxiliar' ? 'PA' : 'Pub'}
+                              </span>
+                              {group.captain_id === m.id && (
+                                <span className="text-xs text-amber-600 ml-1">⭐</span>
+                              )}
+                            </div>
+                            <button
+                              onClick={() => handleRemoveMember(m.id)}
+                              className="text-red-400 hover:text-red-600 text-sm transition-colors"
+                              title="Quitar del grupo"
+                            >
+                              ✕
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
