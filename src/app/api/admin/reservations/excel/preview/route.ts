@@ -168,6 +168,8 @@ export async function POST(req: NextRequest) {
   const slotUpdates = new Map<string, SlotUpdatePatch>()
   const slotActions: SlotAction[] = []
   const slotsToCreate: SlotToCreate[] = []
+  // Mapa de slots pendientes del Excel (para detectar conflictos DENTRO del mismo archivo)
+  const pendingSlotsByGroup = new Map<string, Array<{ start_time: string; end_time: string }>>()
 
   const addCellError = (rowNum: number, column: string, detail: string) => {
     errors.push(`Fila ${rowNum}, columna "${column}": ${detail}`)
@@ -222,35 +224,29 @@ export async function POST(req: NextRequest) {
     if (!slot) {
       const endTime = calculateEndTime(startTime)
       const groupKey = `${exhibitor.id}|${dayOfWeek}`
-      const existingSlotsForDay = slotsByExhibitorAndDay.get(groupKey) ?? []
 
-      const conflictingSlot = existingSlotsForDay.find((s) =>
-        s.end_time && hasTimeConflict(startTime, endTime, s.start_time, s.end_time),
+      // Detectar conflictos SOLO contra slots del mismo Excel (no contra la BD)
+      // El Excel es la fuente de verdad
+      const pendingForGroup = pendingSlotsByGroup.get(groupKey) ?? []
+      const conflictingPending = pendingForGroup.find((s) =>
+        hasTimeConflict(startTime, endTime, s.start_time, s.end_time),
       )
 
-      if (conflictingSlot) {
-        addCellError(rowNum, 'hora',
-          `conflicto: ${shortTime(startTime)}-${shortTime(endTime)} se cruza con ${shortTime(conflictingSlot.start_time)}-${shortTime(conflictingSlot.end_time!)}.`,
-        )
-        slotActions.push({
+      if (conflictingPending) {
+        // Error real: DOS filas del Excel se cruzan en el mismo exhibidor/día
+        addCellError(
           rowNum,
-          exhibitor_name: exhibitorRaw,
-          day: String(dayRaw),
-          hour: shortTime(startTime),
-          action: 'ERROR',
-          message: `Conflicto con ${shortTime(conflictingSlot.start_time)}-${shortTime(conflictingSlot.end_time!)}`,
-        })
+          'hora',
+          `conflicto DENTRO del Excel: ${shortTime(startTime)}-${shortTime(endTime)} se cruza con ${shortTime(conflictingPending.start_time)}-${shortTime(conflictingPending.end_time)}`,
+        )
         continue
       }
 
-      // Preview: marcar como CREADO pero no crear en BD
-      slotsToCreate.push({
-        exhibitor_id: exhibitor.id,
-        day_of_week: dayOfWeek,
-        start_time: startTime,
-        end_time: endTime,
-        congregation_id: admin.congregation_id,
-      })
+      // Registrar este slot en pendientes para futuras comparaciones
+      if (!pendingSlotsByGroup.has(groupKey)) {
+        pendingSlotsByGroup.set(groupKey, [])
+      }
+      pendingSlotsByGroup.get(groupKey)!.push({ start_time: startTime, end_time: endTime })
 
       slotActions.push({
         rowNum,
@@ -260,21 +256,19 @@ export async function POST(req: NextRequest) {
         action: 'CREADO',
       })
 
-      // Slot virtual para continuar validación
-      const virtualSlot: SlotLookupRow = {
-        id: `preview-${slotKey}`,
+      slotsToCreate.push({
         exhibitor_id: exhibitor.id,
         day_of_week: dayOfWeek,
         start_time: startTime,
-        is_active: true,
-        block_reason: null,
-      }
-      slotMap.set(slotKey, virtualSlot)
-      const currentGroup = slotsByExhibitorAndDay.get(groupKey) ?? []
-      currentGroup.push(virtualSlot)
-      slotsByExhibitorAndDay.set(groupKey, currentGroup)
-      slot = virtualSlot
-    } else {
+        end_time: endTime,
+        congregation_id: admin.congregation_id,
+      })
+
+      continue
+    }
+
+    // ─── Slot existente: actualizar bloqueo/asignaciones ──────
+    {
       const currentBlocked = !slot.is_active
       const blockedInstruction = parseBlockedInstruction(blockedRaw, estadoRaw)
       const effectiveBlocked = blockedInstruction.value === null ? currentBlocked : blockedInstruction.value
@@ -386,6 +380,7 @@ export async function POST(req: NextRequest) {
   const createdCount = slotActions.filter((a) => a.action === 'CREADO').length
   const updatedCount = slotActions.filter((a) => a.action === 'ACTUALIZADO').length
   const errorCount = slotActions.filter((a) => a.action === 'ERROR').length
+  const warningCount = slotActions.filter((a) => a.action === 'WARNING').length
   const existingCount = slotActions.filter((a) => a.action === 'EXISTENTE').length
   const userAssignments = assignments.length
 
@@ -398,6 +393,7 @@ export async function POST(req: NextRequest) {
     createdSlots: createdCount,
     updatedSlots: updatedCount,
     errorSlots: errorCount,
+    warningSlots: warningCount,
     existingSlots: existingCount,
     userAssignments,
     skipped,

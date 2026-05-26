@@ -75,7 +75,7 @@ type SlotAction = {
   exhibitor_name: string
   day: string
   hour: string
-  action: 'CREADO' | 'EXISTENTE' | 'ERROR'
+  action: 'CREADO' | 'EXISTENTE' | 'ERROR' | 'WARNING'
   message?: string
   slot_id?: string
 }
@@ -593,6 +593,8 @@ export async function POST(req: NextRequest) {
   const slotUpdates = new Map<string, { is_active: boolean; block_reason: string | null }>()
   const slotActions: SlotAction[] = []
   const slotsToCreate: Array<{ exhibitor_id: string; day_of_week: number; start_time: string; end_time: string; congregation_id: string }> = []
+  // Mapa de slots pendientes del Excel (para detectar conflictos DENTRO del mismo archivo)
+  const pendingSlotsByGroup = new Map<string, Array<{ start_time: string; end_time: string }>>()
 
   const addCellError = (rowNum: number, column: string, detail: string) => {
     errors.push(`Fila ${rowNum}, columna "${column}": ${detail}`)
@@ -689,42 +691,34 @@ export async function POST(req: NextRequest) {
     const slotKey = `${exhibitor.id}|${dayOfWeek}|${startTime}`
     let slot = slotMap.get(slotKey)
 
-    // Si el slot no existe, intentar crearlo automáticamente si no hay conflictos
+    // Si el slot no existe, crearlo automáticamente
+    // NOTA: El Excel es la fuente de la verdad. Solo se detectan
+    // conflictos DENTRO del mismo Excel, no contra la BD.
     if (!slot) {
       const endTime = calculateEndTime(startTime)
       const groupKey = `${exhibitor.id}|${dayOfWeek}`
-      const existingSlotsForDay = slotsByExhibitorAndDay.get(groupKey) ?? []
+      const pendingForGroup = pendingSlotsByGroup.get(groupKey) ?? []
 
-      // Detectar conflictos con slots existentes del mismo exhibidor en el mismo día
-      const conflictingSlot = existingSlotsForDay.find((s) =>
-        s.end_time && hasTimeConflict(startTime, endTime, s.start_time, s.end_time),
+      // Detectar conflictos SOLO contra slots del mismo Excel
+      const conflictingPending = pendingForGroup.find((s) =>
+        hasTimeConflict(startTime, endTime, s.start_time, s.end_time),
       )
 
-      if (conflictingSlot) {
+      if (conflictingPending) {
+        // Error: DOS filas del Excel se cruzan en el mismo exhibidor/día
         addCellError(
           rowNum,
           'hora',
-          `conflicto de horarios: ${shortTime(startTime)}-${shortTime(endTime)} se cruza con ${shortTime(conflictingSlot.start_time)}-${shortTime(conflictingSlot.end_time!)}.`,
+          `conflicto DENTRO del Excel: ${shortTime(startTime)}-${shortTime(endTime)} se cruza con ${shortTime(conflictingPending.start_time)}-${shortTime(conflictingPending.end_time)}`,
         )
-        slotActions.push({
-          rowNum,
-          exhibitor_name: exhibitorRaw,
-          day: String(dayRaw),
-          hour: shortTime(startTime),
-          action: 'ERROR',
-          message: `Conflicto con ${shortTime(conflictingSlot.start_time)}-${shortTime(conflictingSlot.end_time!)}`,
-        })
         continue
       }
 
-      // No hay conflicto → crear el slot
-      slotsToCreate.push({
-        exhibitor_id: exhibitor.id,
-        day_of_week: dayOfWeek,
-        start_time: startTime,
-        end_time: endTime,
-        congregation_id: admin.congregation_id,
-      })
+      // Registrar para futuras comparaciones
+      if (!pendingSlotsByGroup.has(groupKey)) {
+        pendingSlotsByGroup.set(groupKey, [])
+      }
+      pendingSlotsByGroup.get(groupKey)!.push({ start_time: startTime, end_time: endTime })
 
       slotActions.push({
         rowNum,
@@ -734,22 +728,19 @@ export async function POST(req: NextRequest) {
         action: 'CREADO',
       })
 
-      // Agregar a las estructuras de datos locales para poder encontrarlo luego
-      const newSlotForLookup: SlotLookupRow = {
-        id: `temp-${slotKey}`, // ID temporal, se actualizará después de insertar
+      slotsToCreate.push({
         exhibitor_id: exhibitor.id,
         day_of_week: dayOfWeek,
         start_time: startTime,
-        is_active: true,
-        block_reason: null,
-      }
-      slotMap.set(slotKey, newSlotForLookup)
-      const currentGroup = slotsByExhibitorAndDay.get(groupKey) ?? []
-      currentGroup.push(newSlotForLookup)
-      slotsByExhibitorAndDay.set(groupKey, currentGroup)
+        end_time: endTime,
+        congregation_id: admin.congregation_id,
+      })
 
-      slot = newSlotForLookup
-    } else {
+      continue
+    }
+
+    // ─── Slot existente ─────────────────────────────────────
+    {
       slotActions.push({
         rowNum,
         exhibitor_name: exhibitorRaw,

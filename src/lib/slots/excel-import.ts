@@ -46,7 +46,7 @@ export type SlotAction = {
   exhibitor_name: string
   day: string
   hour: string
-  action: 'CREADO' | 'ACTUALIZADO' | 'EXISTENTE' | 'ERROR'
+  action: 'CREADO' | 'ACTUALIZADO' | 'EXISTENTE' | 'ERROR' | 'WARNING'
   message?: string
   slot_id?: string
 }
