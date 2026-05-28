@@ -475,6 +475,7 @@ export default function ExhibitorGrid() {
         .from('users')
         .select('id, name, user_type')
         .eq('id', user.spouse_id!)
+        .eq('is_active', true)
         .single()
       if (data) setSpouse(data as Pick<User, 'id' | 'name' | 'user_type'>)
     }

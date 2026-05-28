@@ -169,7 +169,11 @@ export default function AdminUserManager() {
     const term = spouseSearchTerm.toLowerCase()
     const matches = users.filter(u =>
       u.is_active &&
+      !u.spouse_id &&
       u.id !== editingUser?.id &&
+      editingUser?.gender &&
+      u.gender &&
+      u.gender !== editingUser.gender &&
       u.name.toLowerCase().includes(term)
     )
     setSpouseSearchMatches(matches)
@@ -471,11 +475,14 @@ export default function AdminUserManager() {
     return users.find(u => u.id === spouseId)?.name || null
   }
 
-  // Usuarios disponibles para vincular (activos, sin cónyuge, no el mismo)
+  // Usuarios disponibles para vincular (activos, sin cónyuge, sexo opuesto, no el mismo)
   const availableSpouses = users.filter(u =>
     u.is_active &&
     !u.spouse_id &&
     u.id !== spouseTargetUser?.id &&
+    spouseTargetUser?.gender &&
+    u.gender &&
+    u.gender !== spouseTargetUser.gender &&
     u.name.toLowerCase().includes(spouseSearch.toLowerCase())
   )
 
@@ -1507,9 +1514,9 @@ export default function AdminUserManager() {
                         </span>
                         <button
                           onClick={() => setSelectedSpouseId(null)}
-                          className="text-xs text-indigo-600 hover:text-indigo-800"
+                          className="text-xs text-red-500 hover:text-red-700"
                         >
-                          Cambiar
+                          Eliminar
                         </button>
                       </div>
                     )}
