@@ -98,6 +98,12 @@ export default function AdminUserManager() {
   // Mapea userId → clave en texto plano recién generada.
   // Se borra al recargar la página para no exponer claves.
   const [generatedKeys, setGeneratedKeys] = useState<Map<string, string>>(new Map())
+  // ─── Estado del cónyuge seleccionado en el modal de edición ────────
+  const [selectedSpouseId, setSelectedSpouseId] = useState<string | null>(null)
+  // ─── Estado para selección de cónyuge en el modal de edición ───────
+  const [spouseSearchTerm, setSpouseSearchTerm] = useState('')
+  const [spouseSearchMatches, setSpouseSearchMatches] = useState<User[]>([])
+  const [spouseSaving, setSpouseSaving] = useState(false)
   // ─── Estado del modal de envío masivo por WhatsApp ────────
   const [showBulkModal, setShowBulkModal] = useState(false)
   const [bulkQueue, setBulkQueue] = useState<{ user: User; key: string }[]>([])
@@ -144,6 +150,30 @@ export default function AdminUserManager() {
       return () => clearTimeout(timer)
     }
   }, [errorMsg])
+
+  // Inicializar selectedSpouseId al abrir modal de edicion
+  useEffect(() => {
+    if (editingUser) {
+      setSelectedSpouseId(editingUser.spouse_id ?? null)
+    } else {
+      setSelectedSpouseId(null)
+    }
+  }, [editingUser])
+
+  // Filtrar coincidencias de conyuge segun busqueda
+  useEffect(() => {
+    if (!spouseSearchTerm.trim()) {
+      setSpouseSearchMatches([])
+      return
+    }
+    const term = spouseSearchTerm.toLowerCase()
+    const matches = users.filter(u =>
+      u.is_active &&
+      u.id !== editingUser?.id &&
+      u.name.toLowerCase().includes(term)
+    )
+    setSpouseSearchMatches(matches)
+  }, [spouseSearchTerm, users, editingUser])
 
   // =============================================================
   // Filtrado y búsqueda de usuarios
@@ -243,6 +273,33 @@ export default function AdminUserManager() {
     setFormErrors([])
   }
 
+  // Actualizar relación de cónyuge desde el modal de edición (sin confirmación)
+  const updateSpouse = async (userId: string, spouseId: string | null) => {
+    if (spouseId) {
+      const res = await fetch(`/api/admin/users/${userId}/spouse`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-access-key': currentAdmin?.access_key ?? '',
+        },
+        body: JSON.stringify({ spouse_id: spouseId }),
+      })
+      if (!res.ok) {
+        const json = await res.json()
+        throw new Error(json.error ?? 'Error al vincular cónyuge')
+      }
+    } else {
+      const res = await fetch(`/api/admin/users/${userId}/spouse`, {
+        method: 'DELETE',
+        headers: { 'x-access-key': currentAdmin?.access_key ?? '' },
+      })
+      if (!res.ok) {
+        const json = await res.json()
+        throw new Error(json.error ?? 'Error al desvincular cónyuge')
+      }
+    }
+  }
+
   // =============================================================
   // Guardar usuario (crear o actualizar)
   // =============================================================
@@ -286,6 +343,16 @@ export default function AdminUserManager() {
         return
       }
 
+      // Actualizar cónyuge si ha cambiado
+      try {
+        const spouseId = selectedSpouseId || null
+        await updateSpouse(editingUser.id, spouseId)
+      } catch (error: unknown) {
+        setSaving(false)
+        setFormErrors([(error as Error).message])
+        return
+      }
+
       setSuccessMsg(`Usuario "${formData.name.trim()}" actualizado correctamente.`)
     } else {
       // ─── CREAR usuario nuevo ─────────────────────────────
@@ -314,6 +381,18 @@ export default function AdminUserManager() {
         }
         setSaving(false)
         return
+      }
+
+      const newUser = json2.user as User
+      // Si hay cónyuge seleccionado, vincularlo después de crear
+      if (selectedSpouseId) {
+        try {
+          await updateSpouse(newUser.id, selectedSpouseId)
+        } catch (error: unknown) {
+          setSaving(false)
+          setFormErrors([(error as Error).message])
+          return
+        }
       }
 
       setSuccessMsg(`Usuario "${formData.name.trim()}" creado exitosamente.`)
@@ -642,6 +721,24 @@ export default function AdminUserManager() {
       `Esto borrará sus reservaciones, invitaciones y todos sus datos. No se puede deshacer.`
     )
     if (!confirmed) return
+
+    // Si el usuario tiene conyuge, desvincularlo primero
+    if (targetUser.spouse_id) {
+      try {
+        const res = await fetch(`/api/admin/users/${targetUser.id}/spouse`, {
+          method: 'DELETE',
+          headers: { 'x-access-key': currentAdmin?.access_key ?? '' },
+        })
+        if (!res.ok) {
+          const json = await res.json()
+          setErrorMsg(`Error al desvincular conyuge antes de eliminar: ${json.error}`)
+          return
+        }
+      } catch (err) {
+        setErrorMsg('Error de conexion al desvincular conyuge.')
+        return
+      }
+    }
 
     try {
       const res = await fetch(`/api/admin/users/${targetUser.id}`, {
@@ -1366,6 +1463,64 @@ export default function AdminUserManager() {
                   Colombia: <span className="font-mono">57</span> + 10 dígitos. Ej: <span className="font-mono">573001234567</span>
                 </p>
               </div>
+
+              {/* Campo: Cónyuge (solo en modo edición) */}
+              {editingUser && (
+                <div className="mb-3">
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Cónyuge
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={spouseSearchTerm}
+                      onChange={e => setSpouseSearchTerm(e.target.value)}
+                      placeholder="Buscar cónyuge por nombre..."
+                      className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                    />
+                    {spouseSearchTerm && spouseSearchMatches.length > 0 && (
+                      <div className="absolute z-10 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                        {spouseSearchMatches.map(match => (
+                          <div
+                            key={match.id}
+                            className={`px-3 py-2 cursor-pointer hover:bg-indigo-50 ${
+                              selectedSpouseId === match.id ? 'bg-indigo-100' : ''
+                            }`}
+                            onClick={() => {
+                              setSelectedSpouseId(match.id);
+                              setSpouseSearchTerm('');
+                              setSpouseSearchMatches([]);
+                            }}
+                          >
+                            <div className="font-medium text-gray-800">{match.name}</div>
+                            {match.phone && (
+                              <div className="text-xs text-gray-500">{match.phone}</div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {!spouseSearchTerm && selectedSpouseId && (
+                      <div className="mt-2 flex items-center gap-2">
+                        <span className="text-xs text-indigo-600">
+                          Seleccionado: {getSpouseName(selectedSpouseId) || 'Cónyuge'}
+                        </span>
+                        <button
+                          onClick={() => setSelectedSpouseId(null)}
+                          className="text-xs text-indigo-600 hover:text-indigo-800"
+                        >
+                          Cambiar
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                  {spouseSaving && (
+                    <p className="text-xs text-indigo-600 mt-1">
+                      Guardando relación de cónyuge...
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* Pie del modal: botones de acción */}

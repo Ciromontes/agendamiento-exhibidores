@@ -19,7 +19,7 @@ export async function GET(req: NextRequest) {
   const supabase = createServiceClient()
   const { data, error } = await supabase
     .from('users')
-    .select('id, name, user_type, gender, is_admin, is_active, access_key, phone, congregation_id, group_id, created_at')
+    .select('id, name, user_type, gender, is_admin, is_active, access_key, phone, spouse_id, congregation_id, group_id, created_at')
     .eq('congregation_id', admin.congregation_id)
     .order('name', { ascending: true })
 
@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
     const { name, access_key, user_type, gender, is_admin, phone } = body
 
     const supabase = createServiceClient()
-    const { error } = await supabase
+    const { data: newUser, error } = await supabase
       .from('users')
       .insert({
         name: name?.trim(),
@@ -49,6 +49,8 @@ export async function POST(req: NextRequest) {
         phone: phone ? String(phone).replace(/\D/g, '') || null : null,
         congregation_id: admin.congregation_id,
       })
+      .select('id, name, user_type, gender, is_admin, is_active, access_key, phone, spouse_id, congregation_id, group_id, created_at')
+      .single()
 
     if (error) {
       const isDuplicate = error.code === '23505'
@@ -58,7 +60,7 @@ export async function POST(req: NextRequest) {
       )
     }
 
-    return NextResponse.json({ ok: true }, { status: 201 })
+    return NextResponse.json({ user: newUser }, { status: 201 })
   } catch {
     return NextResponse.json({ error: 'Error interno' }, { status: 500 })
   }
