@@ -61,22 +61,33 @@ function formatWeekLabel(weekStart: string): string {
   const start = new Date(weekStart + 'T12:00:00')
   const end   = new Date(weekStart + 'T12:00:00')
   end.setDate(end.getDate() + 6)
-  const fmt = (d: Date) =>
-    d.toLocaleDateString('es', { day: 'numeric', month: 'short' })
-  return `${fmt(start)} – ${fmt(end)}`
+  const fmt = (d: Date, includeYear = false) =>
+    d.toLocaleDateString('es', {
+      day: 'numeric',
+      month: 'short',
+      ...(includeYear ? { year: 'numeric' } : {}),
+    })
+  return `${fmt(start)} – ${fmt(end, true)}`
 }
 
 const HISTORY_WEEKS = 12
 
-/** Genera la lista de semanas pasadas relativa a active_week_start. */
-function buildPastWeeks(activeWeekStart: string): { value: string; label: string }[] {
+/** Genera la lista de semanas: activa + pasadas (HISTORY_WEEKS). */
+function buildWeekOptions(activeWeekStart: string): { value: string; label: string }[] {
   const active = new Date(activeWeekStart + 'T12:00:00')
-  return Array.from({ length: HISTORY_WEEKS }, (_, i) => {
+  const options: { value: string; label: string }[] = [
+    {
+      value: activeWeekStart,
+      label: `Semana abierta actualmente · ${formatWeekLabel(activeWeekStart)}`,
+    },
+  ]
+  const past = Array.from({ length: HISTORY_WEEKS }, (_, i) => {
     const d = new Date(active)
     d.setDate(d.getDate() - (i + 1) * 7)
     const val = d.toISOString().split('T')[0]
     return { value: val, label: formatWeekLabel(val) }
   })
+  return options.concat(past)
 }
 
 // ─── Componente principal ─────────────────────────────────────
@@ -102,7 +113,7 @@ export default function AdminHistoryPanel() {
       .single()
       .then(({ data }) => {
         const aw = data?.active_week_start ?? getMondayOfDate(new Date())
-        setPastWeeks(buildPastWeeks(aw))
+        setPastWeeks(buildWeekOptions(aw))
       })
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [congregationId])
@@ -169,7 +180,7 @@ function GlobalHistoryView({
 }) {
   const supabase = createClient()
 
-  const [weekIdx,      setWeekIdx]      = useState(0) // 0 = semana más reciente
+  const [weekIdx,      setWeekIdx]      = useState(0) // 0 = semana abierta actualmente
   const [exhibitors,   setExhibitors]   = useState<Exhibitor[]>([])
   const [timeSlots,    setTimeSlots]    = useState<TimeSlot[]>([])
   const [reservations, setReservations] = useState<ResWithUser[]>([])
@@ -258,7 +269,7 @@ function GlobalHistoryView({
           <div className="text-center min-w-[200px]">
             <p className="text-sm font-semibold text-gray-800">{weekLabel}</p>
             {weekIdx === 0 && (
-              <p className="text-[10px] text-indigo-500 font-medium">Semana más reciente</p>
+              <p className="text-[10px] text-indigo-500 font-medium">Semana abierta actualmente</p>
             )}
           </div>
           <button
@@ -691,7 +702,7 @@ function UserHistoryView({
         </div>
       ) : turns.length === 0 ? (
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-10 text-center">
-          <p className="text-gray-400 text-sm">Sin turnos registrados en las últimas {pastWeeks.length} semanas.</p>
+          <p className="text-gray-400 text-sm">Sin turnos registrados en las semanas disponibles.</p>
         </div>
       ) : (
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 overflow-hidden">

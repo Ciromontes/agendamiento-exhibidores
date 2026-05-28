@@ -1046,10 +1046,7 @@ export default function ExhibitorGrid() {
       .eq('status', 'accepted')
       .limit(1)
 
-    if (acceptedRelief && acceptedRelief.length > 0) {
-      await handleOpenReliefModal(myReservation)
-      return
-    }
+    const acceptedReliefByMe = (acceptedRelief?.length ?? 0) > 0
 
     // Fase 3: verificar si el otro ocupante es el cónyuge
     const slotRes = getSlotReservations(myReservation.time_slot_id)
@@ -1057,7 +1054,7 @@ export default function ExhibitorGrid() {
     const otherIsSpouse = spouse && otherReservation?.user_id === spouse.id
 
     // Feature 1: Si la reserva vino de una invitación aceptada → siempre relevo
-    if (isViaAcceptedInvitation(myReservation.time_slot_id, user!.id)) {
+    if (!acceptedReliefByMe && isViaAcceptedInvitation(myReservation.time_slot_id, user!.id)) {
       await handleOpenReliefModal(myReservation)
       return
     }
@@ -1065,15 +1062,18 @@ export default function ExhibitorGrid() {
     // Fase 2: Fuera de la ventana de cancelación (y no es cónyuge) → flujo de relevo.
     // Aplica tanto para slots 1/2 como 2/2: el usuario no puede cancelar unilateralmente
     // después de los primeros minutos, debe pedir relevo.
-    if (!otherIsSpouse && !isWithinCancelWindow(myReservation.created_at, cancelWindowMs)) {
+    if (!otherIsSpouse && !acceptedReliefByMe && !isWithinCancelWindow(myReservation.created_at, cancelWindowMs)) {
       await handleOpenReliefModal(myReservation)
       return
     }
 
     // Mensaje de confirmación adaptado según si hay cónyuge
-    const confirmMsg = otherIsSpouse
+    let confirmMsg = otherIsSpouse
       ? `¿Cancelar esta reserva? También se cancelará la de tu cónyuge (${spouse?.name}).`
       : '¿Cancelar esta reserva?'
+    if (acceptedReliefByMe) {
+      confirmMsg += '\n\nEste turno se tomó como relevo. Al cancelar, el turno quedará libre.'
+    }
     if (!confirm(confirmMsg)) return
 
     // Cancelar la reserva del usuario
