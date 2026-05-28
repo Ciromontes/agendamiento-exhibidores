@@ -190,6 +190,9 @@ export default function ExhibitorGrid() {
   const [myPendingReliefs, setMyPendingReliefs] = useState<
     { id: string; reservation_id: string; slot_id: string }[]
   >([])
+  // acceptedReliefReservations: reservas que YO tomé como relevo esta semana
+  //   → permite cancelar aunque haya pasado la ventana
+  const [acceptedReliefReservations, setAcceptedReliefReservations] = useState<string[]>([])
   // openReliefBySlot: relevos abiertos de OTROS en esta semana (Feature 2: incluye nombre)
   const [openReliefBySlot, setOpenReliefBySlot] = useState<
     Record<string, { id: string; from_user_id: string; name: string }>
@@ -342,6 +345,20 @@ export default function ExhibitorGrid() {
       if (reliefData) setMyPendingReliefs(
         reliefData as { id: string; reservation_id: string; slot_id: string }[]
       )
+
+      // Relevos aceptados por mí esta semana (permite cancelación directa)
+      const { data: acceptedData } = await supabase
+        .from('relief_requests')
+        .select('reservation_id')
+        .eq('acceptor_id', user.id)
+        .eq('week_start', weekStart)
+        .eq('status', 'accepted')
+      if (acceptedData) {
+        const ids = acceptedData
+          .map(r => r.reservation_id)
+          .filter((id): id is string => Boolean(id))
+        setAcceptedReliefReservations([...new Set(ids)])
+      }
 
       // Invitaciones aceptadas esta semana (Feature 1: bloquear cancelación directa)
       const { data: accInvData } = await supabase
@@ -496,6 +513,7 @@ export default function ExhibitorGrid() {
     setAcceptedInvitationSlots([])
     setSlotPendingInvitations([])
     setMyPendingReliefs([])
+    setAcceptedReliefReservations([])
     setOpenReliefBySlot({})
   }, [user?.id])
 
@@ -1387,6 +1405,17 @@ export default function ExhibitorGrid() {
                             {isSpouse && '💑 '}{reservation?.user?.name || 'Reservado'}
                           </p>
                           {isOwn && (() => {
+                            const acceptedReliefByMe = acceptedReliefReservations.includes(reservation!.id)
+                            if (acceptedReliefByMe) {
+                              return (
+                                <button
+                                  onClick={() => handleCancel(reservation!.id)}
+                                  className="text-red-500 hover:text-red-700 text-[10px] underline"
+                                >
+                                  Cancelar relevo
+                                </button>
+                              )
+                            }
                             const cd = getCancelCountdown(reservation!.created_at, cancelWindowMs, nowMs)
                             if (cd) {
                               return (
@@ -1541,6 +1570,17 @@ export default function ExhibitorGrid() {
                           <p className="text-[10px] text-orange-600 font-medium">🔄 pide relevo</p>
                         )}
                         {isOwn1 && (() => {
+                          const acceptedReliefByMe = acceptedReliefReservations.includes(pos1!.id)
+                          if (acceptedReliefByMe) {
+                            return (
+                              <button
+                                onClick={() => handleCancel(pos1!.id)}
+                                className="text-red-500 hover:text-red-700 text-[10px] underline"
+                              >
+                                Cancelar relevo
+                              </button>
+                            )
+                          }
                           // Feature 1: reserva por invitación aceptada → siempre relevo
                           if (isViaAcceptedInvitation(slot.id, user!.id)) {
                             const hasPendingRelief1 = myPendingReliefs.some(
@@ -1602,6 +1642,17 @@ export default function ExhibitorGrid() {
                           <p className="text-[10px] text-orange-600 font-medium">🔄 pide relevo</p>
                         )}
                         {isOwn2 && (() => {
+                          const acceptedReliefByMe = acceptedReliefReservations.includes(pos2!.id)
+                          if (acceptedReliefByMe) {
+                            return (
+                              <button
+                                onClick={() => handleCancel(pos2!.id)}
+                                className="text-red-500 hover:text-red-700 text-[10px] underline"
+                              >
+                                Cancelar relevo
+                              </button>
+                            )
+                          }
                           // Feature 1: reserva por invitación aceptada → siempre relevo
                           if (isViaAcceptedInvitation(slot.id, user!.id)) {
                             const hasPendingRelief2 = myPendingReliefs.some(

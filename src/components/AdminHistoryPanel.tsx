@@ -179,6 +179,8 @@ function GlobalHistoryView({
   congregationId: string
 }) {
   const supabase = createClient()
+  const { user } = useUser()
+  const accessKey = user?.access_key ?? ''
 
   const [weekIdx,      setWeekIdx]      = useState(0) // 0 = semana abierta actualmente
   const [exhibitors,   setExhibitors]   = useState<Exhibitor[]>([])
@@ -186,6 +188,7 @@ function GlobalHistoryView({
   const [reservations, setReservations] = useState<ResWithUser[]>([])
   const [reliefs,      setReliefs]      = useState<ReliefRow[]>([])
   const [loading,      setLoading]      = useState(true)
+  const [cancelLoadingId, setCancelLoadingId] = useState<string | null>(null)
 
   const selectedWeek = pastWeeks[weekIdx]?.value ?? ''
   const weekLabel    = pastWeeks[weekIdx]?.label ?? ''
@@ -229,6 +232,49 @@ function GlobalHistoryView({
 
   useEffect(() => { loadData() }, [loadData])
 
+  const handleForceCancel = async (
+    reservationId: string,
+    userName: string | null,
+    day: number,
+    startTime: string,
+    endTime: string,
+  ) => {
+    if (!accessKey) {
+      alert('Acceso admin invalido.')
+      return
+    }
+
+    const timeLabel = (startTime && endTime)
+      ? formatTimeLabel(startTime, endTime)
+      : '—'
+    const targetName = userName ?? 'usuario'
+
+    const ok = confirm(
+      `¿Eliminar el agendamiento de "${targetName}"?\n\n` +
+      `Semana: ${weekLabel}\n` +
+      `Dia: ${DAYS_OF_WEEK[day]}\n` +
+      `Horario: ${timeLabel}`
+    )
+    if (!ok) return
+
+    setCancelLoadingId(reservationId)
+    try {
+      const res = await fetch(`/api/admin/reservations/${reservationId}`, {
+        method: 'DELETE',
+        headers: { 'x-access-key': accessKey },
+      })
+      const json = await res.json()
+      if (!res.ok) {
+        alert(json.error ?? 'Error al eliminar el agendamiento.')
+      } else {
+        await loadData()
+      }
+    } catch {
+      alert('Error de conexion al eliminar el agendamiento.')
+    }
+    setCancelLoadingId(null)
+  }
+
   // Helpers
   const getSlotsForExhibitor = (exhibitorId: string) =>
     timeSlots
@@ -249,6 +295,7 @@ function GlobalHistoryView({
   const emptySlots    = activeSlots - coveredSlots
   const totalPeople   = reservations.length
   const totalReliefs  = reliefs.filter(r => r.status === 'accepted').length
+  const canDelete = weekIdx === 0 && Boolean(accessKey)
 
   // Exhibidores que tienen al menos 1 slot con al menos 1 reserva
   const exhibidoresConDatos = exhibitors.filter(ex =>
@@ -414,6 +461,21 @@ function GlobalHistoryView({
                                               <span className="text-[9px] bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded-full whitespace-nowrap">
                                                 🔄 relevado por {relief.acceptor?.name ?? '?'}
                                               </span>
+                                            )}
+                                            {canDelete && (
+                                              <button
+                                                onClick={() => handleForceCancel(
+                                                  r.id,
+                                                  r.user?.name ?? null,
+                                                  slot.day_of_week,
+                                                  slot.start_time,
+                                                  slot.end_time,
+                                                )}
+                                                disabled={cancelLoadingId === r.id}
+                                                className="text-[10px] px-2 py-0.5 rounded-md text-red-700 bg-red-50 border border-red-100 hover:bg-red-100 disabled:opacity-60"
+                                              >
+                                                {cancelLoadingId === r.id ? 'Eliminando...' : '🗑 Eliminar'}
+                                              </button>
                                             )}
                                           </div>
                                         )
