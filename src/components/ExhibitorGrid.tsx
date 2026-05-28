@@ -1031,9 +1031,25 @@ export default function ExhibitorGrid() {
    * se cancelan ambas reservas automáticamente.
    */
   const handleCancel = async (reservationId: string) => {
+    if (!user) return
     // Buscar la reserva que se quiere cancelar
     const myReservation = reservations.find(r => r.id === reservationId)
     if (!myReservation) return
+
+    // Si esta reserva fue aceptada como relevo por el usuario actual,
+    // no permitir cancelacion directa: debe pedir relevo nuevamente.
+    const { data: acceptedRelief } = await supabase
+      .from('relief_requests')
+      .select('id')
+      .eq('reservation_id', reservationId)
+      .eq('acceptor_id', user.id)
+      .eq('status', 'accepted')
+      .limit(1)
+
+    if (acceptedRelief && acceptedRelief.length > 0) {
+      await handleOpenReliefModal(myReservation)
+      return
+    }
 
     // Fase 3: verificar si el otro ocupante es el cónyuge
     const slotRes = getSlotReservations(myReservation.time_slot_id)
@@ -1061,13 +1077,20 @@ export default function ExhibitorGrid() {
     if (!confirm(confirmMsg)) return
 
     // Cancelar la reserva del usuario
-    const { error } = await supabase
+    const { data: cancelledRows, error } = await supabase
       .from('reservations')
       .update({ status: 'cancelled' })
       .eq('id', reservationId)
+      .eq('user_id', user.id)
+      .select('id')
 
     if (error) {
       alert('Error al cancelar: ' + error.message)
+      return
+    }
+
+    if (!cancelledRows || cancelledRows.length === 0) {
+      alert('No se pudo cancelar: la reserva ya fue transferida o eliminada.')
       return
     }
 

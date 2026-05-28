@@ -36,6 +36,7 @@ type ReliefRow = {
 }
 
 type UserTurn = {
+  reservation_id: string
   week_start: string
   weekLabel:  string
   exhibitorName: string
@@ -438,12 +439,15 @@ function UserHistoryView({
   congregationId: string
 }) {
   const supabase = createClient()
+  const { user } = useUser()
+  const accessKey = user?.access_key ?? ''
 
   const [users,         setUsers]         = useState<Pick<User, 'id' | 'name' | 'user_type'>[]>([])
   const [selectedUserId, setSelectedUserId] = useState<string>('')
   const [turns,         setTurns]         = useState<UserTurn[]>([])
   const [loading,       setLoading]       = useState(false)
   const [usersLoading,  setUsersLoading]  = useState(true)
+  const [cancelLoadingId, setCancelLoadingId] = useState<string | null>(null)
 
   // Cargar lista de usuarios activos
   useEffect(() => {
@@ -565,6 +569,7 @@ function UserHistoryView({
     const built: UserTurn[] = resData.map(r => {
       const ts = r.time_slot as unknown as TimeSlot | null
       return {
+        reservation_id: r.id,
         week_start:     r.week_start,
         weekLabel:      weekMap.get(r.week_start) ?? r.week_start,
         exhibitorName:  ts?.exhibitor_id ? (exhibitorMap.get(ts.exhibitor_id) ?? '—') : '—',
@@ -592,6 +597,43 @@ function UserHistoryView({
   useEffect(() => {
     if (selectedUserId) loadUserHistory()
   }, [loadUserHistory, selectedUserId])
+
+  const handleForceCancel = async (turn: UserTurn) => {
+    if (!accessKey) {
+      alert('Acceso admin invalido.')
+      return
+    }
+
+    const targetName = users.find(u => u.id === selectedUserId)?.name ?? 'usuario'
+    const timeLabel = (turn.start_time && turn.end_time)
+      ? formatTimeLabel(turn.start_time, turn.end_time)
+      : '—'
+
+    const ok = confirm(
+      `¿Eliminar el agendamiento de "${targetName}"?\n\n` +
+      `Semana: ${turn.weekLabel}\n` +
+      `Dia: ${DAYS_OF_WEEK[turn.day]}\n` +
+      `Horario: ${timeLabel}`
+    )
+    if (!ok) return
+
+    setCancelLoadingId(turn.reservation_id)
+    try {
+      const res = await fetch(`/api/admin/reservations/${turn.reservation_id}`, {
+        method: 'DELETE',
+        headers: { 'x-access-key': accessKey },
+      })
+      const json = await res.json()
+      if (!res.ok) {
+        alert(json.error ?? 'Error al eliminar el agendamiento.')
+      } else {
+        await loadUserHistory()
+      }
+    } catch {
+      alert('Error de conexion al eliminar el agendamiento.')
+    }
+    setCancelLoadingId(null)
+  }
 
   // Estadísticas rápidas
   const totalTurns    = turns.length
@@ -663,6 +705,7 @@ function UserHistoryView({
                   <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 whitespace-nowrap">Horario</th>
                   <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 whitespace-nowrap">Compañero/a</th>
                   <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 whitespace-nowrap">Relevo</th>
+                  <th className="text-left px-4 py-2.5 text-xs font-semibold text-gray-500 whitespace-nowrap">Acciones</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-50">
@@ -695,6 +738,15 @@ function UserHistoryView({
                       ) : (
                         <span className="text-gray-300">—</span>
                       )}
+                    </td>
+                    <td className="px-4 py-2.5 text-xs">
+                      <button
+                        onClick={() => handleForceCancel(t)}
+                        disabled={!accessKey || cancelLoadingId === t.reservation_id}
+                        className="px-2.5 py-1 rounded-md text-[11px] font-semibold text-red-700 bg-red-50 border border-red-100 hover:bg-red-100 disabled:opacity-60"
+                      >
+                        {cancelLoadingId === t.reservation_id ? 'Eliminando...' : '🗑 Eliminar'}
+                      </button>
                     </td>
                   </tr>
                 ))}
