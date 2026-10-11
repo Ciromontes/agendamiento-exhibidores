@@ -106,7 +106,7 @@ export default function AdminConfigPanel() {
       reset_current: 'reiniciar la semana en curso y dejar todos los turnos en cero',
       advance_blank: 'abrir la nueva semana en blanco (sin reservas)',
       advance_keep: 'abrir la nueva semana manteniendo los cupos actuales',
-      advance_only: 'abrir la siguiente semana sin modificar las reservas ya cargadas',
+      advance_only: 'abrir la siguiente semana copiando las reservas actuales sin borrar las ya cargadas',
       rollback_only: 'retroceder a la semana anterior sin tocar los cupos',
       rollback_blank: 'retroceder a la semana anterior borrando los datos de reservas',
     }
@@ -401,7 +401,7 @@ export default function AdminConfigPanel() {
           >
             <p className="text-sm font-bold text-indigo-800">Abrir siguiente semana (sin tocar cupos)</p>
             <p className="text-xs text-indigo-700 mt-1">
-              Avanza a <strong className="capitalize">{quickTargetWeek.range}</strong> respetando reservas ya cargadas.
+                          Avanza a <strong className="capitalize">{quickTargetWeek.range}</strong> copiando las reservas actuales y respetando las ya cargadas.
             </p>
             <p className="text-[11px] text-indigo-600 mt-2">
               {weekActionLoading === 'advance_only' ? 'Procesando...' : '⚠️ Pide confirmación de seguridad'}

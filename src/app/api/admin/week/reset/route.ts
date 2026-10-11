@@ -189,26 +189,78 @@ export async function POST(req: NextRequest) {
   }
 
   if (body.mode === 'advance_only') {
-    const { error: cfgUpdateError } = await supabase
-      .from('app_config')
-      .update({ active_week_start: targetWeek })
-      .eq('id', cfg.id)
-      .eq('congregation_id', admin.congregation_id)
+      // Avanza la fecha y copia las reservas de la semana activa a la próxima
+      // semana calendario, respetando las reservas ya cargadas en la semana
+      // destino (no se borra nada de la semana destino).
+      const { data: sourceReservations, error: sourceError } = await supabase
+        .from('reservations')
+        .select('time_slot_id, user_id, slot_position')
+        .eq('congregation_id', admin.congregation_id)
+        .eq('week_start', currentWeek)
+        .neq('status', 'cancelled')
 
-    if (cfgUpdateError) {
-      return NextResponse.json(
-        { error: 'No se pudo avanzar la semana: ' + cfgUpdateError.message },
-        { status: 500 },
+      if (sourceError) {
+        return NextResponse.json({ error: sourceError.message }, { status: 500 })
+      }
+
+      // Reservas ya existentes en la semana destino (para no duplicar posiciones)
+      const { data: targetReservations, error: targetError } = await supabase
+        .from('reservations')
+        .select('time_slot_id, slot_position')
+        .eq('congregation_id', admin.congregation_id)
+        .eq('week_start', targetWeek)
+        .neq('status', 'cancelled')
+
+      if (targetError) {
+        return NextResponse.json({ error: targetError.message }, { status: 500 })
+      }
+
+      const occupied = new Set(
+        (targetReservations ?? []).map(r => `${r.time_slot_id}:${r.slot_position}`)
       )
-    }
 
-    return NextResponse.json({
-      ok: true,
-      mode: body.mode,
-      active_week_start: targetWeek,
-      message: 'Semana avanzada a la próxima semana calendario sin modificar reservas existentes.',
-    })
-  }
+      const copyRows = (sourceReservations ?? [])
+        .filter(r => !occupied.has(`${r.time_slot_id}:${r.slot_position}`))
+        .map(r => ({
+          time_slot_id: r.time_slot_id,
+          user_id: r.user_id,
+          week_start: targetWeek,
+          status: 'confirmed',
+          slot_position: r.slot_position,
+          congregation_id: admin.congregation_id,
+        }))
+
+      if (copyRows.length > 0) {
+        const { error: insertError } = await supabase.from('reservations').insert(copyRows)
+        if (insertError) {
+          return NextResponse.json(
+            { error: 'No se pudieron copiar reservas a la nueva semana: ' + insertError.message },
+            { status: 500 },
+          )
+        }
+      }
+
+      const { error: cfgUpdateError } = await supabase
+        .from('app_config')
+        .update({ active_week_start: targetWeek })
+        .eq('id', cfg.id)
+        .eq('congregation_id', admin.congregation_id)
+
+      if (cfgUpdateError) {
+        return NextResponse.json(
+          { error: 'Se copiaron reservas, pero no se pudo avanzar la semana: ' + cfgUpdateError.message },
+          { status: 500 },
+        )
+      }
+
+      return NextResponse.json({
+        ok: true,
+        mode: body.mode,
+        active_week_start: targetWeek,
+        copied: copyRows.length,
+        message: `Semana avanzada a la próxima semana calendario copiando las reservas actuales (${copyRows.length} copiadas) sin borrar las ya cargadas.`,
+      })
+    }
 
   const rollbackWeek = addDays(currentWeek, -7)
 

@@ -109,6 +109,9 @@ export default function AdminUserManager() {
   const [bulkQueue, setBulkQueue] = useState<{ user: User; key: string }[]>([])
   const [bulkIndex, setBulkIndex] = useState(0)
   const [bulkStep, setBulkStep] = useState<'generating' | 'sending' | 'done'>('generating')
+    // ─── Confirmación de seguridad para envío masivo ────────
+    const [showBulkConfirm, setShowBulkConfirm] = useState(false)
+    const [bulkConfirmWord, setBulkConfirmWord] = useState('')
   // =============================================================
   // Cargar usuarios desde Supabase
   // =============================================================
@@ -620,6 +623,22 @@ export default function AdminUserManager() {
     await loadUsers()
   }
 
+    /** Abre el modal de confirmación de seguridad antes del envío masivo */
+    const requestBulkSend = () => {
+      setBulkConfirmWord('')
+      setShowBulkConfirm(true)
+    }
+
+    /** Confirma la palabra de seguridad y ejecuta el envío masivo */
+    const confirmBulkSend = () => {
+      if (bulkConfirmWord.trim().toUpperCase() !== 'SEGURO') {
+        alert('Debes escribir SEGURO para confirmar el envío masivo.')
+        return
+      }
+      setShowBulkConfirm(false)
+      void startBulkSend()
+    }
+
   /** Abre WhatsApp con el mensaje pre-escrito y copia al portapapeles como respaldo */
   const openBulkWhatsApp = async (item: { user: User; key: string }) => {
     const phone = (item.user.phone ?? '').replace(/\D/g, '')
@@ -882,7 +901,7 @@ export default function AdminUserManager() {
           <div className="flex gap-2">
             {/* Envío masivo de claves por WhatsApp */}
             <button
-              onClick={startBulkSend}
+                          onClick={requestBulkSend}
               title="Genera claves seguras para todos los usuarios con teléfono y las envía por WhatsApp una a una"
               className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition flex items-center gap-2 whitespace-nowrap"
             >
@@ -1559,8 +1578,59 @@ export default function AdminUserManager() {
       )}
 
       {/* ═══════════════════════════════════════════════════════
-          MODAL: Envío masivo de claves por WhatsApp
+                MODAL: Confirmación de seguridad para envío masivo
           ═══════════════════════════════════════════════════════ */}
+            {showBulkConfirm && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
+                <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+                  <div className="bg-red-600 px-6 py-4 flex items-center justify-between">
+                    <h2 className="text-white font-semibold text-lg">⚠️ Confirmación de seguridad</h2>
+                    <button
+                      onClick={() => setShowBulkConfirm(false)}
+                      className="text-white/70 hover:text-white text-xl leading-none"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                  <div className="p-6 space-y-4">
+                    <p className="text-sm text-gray-700">
+                      Estás a punto de <strong>regenerar las claves de acceso de todos los usuarios</strong> con
+                      teléfono registrado. Esto invalidará sus claves actuales y deberás reenviárselas una a una.
+                    </p>
+                    <p className="text-sm text-gray-700">
+                      Para confirmar, escribe <strong className="font-mono text-red-600">SEGURO</strong> en el campo:
+                    </p>
+                    <input
+                      type="text"
+                      value={bulkConfirmWord}
+                      onChange={e => setBulkConfirmWord(e.target.value)}
+                      placeholder="SEGURO"
+                      autoFocus
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-red-500 focus:border-transparent"
+                    />
+                    <div className="flex gap-3">
+                      <button
+                        onClick={() => setShowBulkConfirm(false)}
+                        className="flex-1 border border-gray-200 hover:bg-gray-50 text-gray-700 py-2.5 rounded-xl font-medium text-sm transition"
+                      >
+                        Cancelar
+                      </button>
+                      <button
+                        onClick={confirmBulkSend}
+                        disabled={bulkConfirmWord.trim().toUpperCase() !== 'SEGURO'}
+                        className="flex-1 bg-red-600 hover:bg-red-700 disabled:opacity-40 disabled:cursor-not-allowed text-white py-2.5 rounded-xl font-medium text-sm transition"
+                      >
+                        Confirmar envío
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ═══════════════════════════════════════════════════════
+                MODAL: Envío masivo de claves por WhatsApp
+                ═══════════════════════════════════════════════════════ */}
       {showBulkModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm">
           <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">

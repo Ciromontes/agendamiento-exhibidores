@@ -34,7 +34,7 @@ import ActiveWeekBanner from '@/components/ActiveWeekBanner'
 import {
   Exhibitor, TimeSlot, Reservation, User,
   DAYS_OF_WEEK, DAY_ORDER,
-  USER_TYPE_LABELS, formatTimeLabel, getMonthStart,
+  USER_TYPE_LABELS, formatTimeLabel, formatCompactTimeLabel, getMonthStart,
   isLastWeekOfMonth, getMonthStartFromWeek,
 } from '@/types'
 
@@ -175,6 +175,7 @@ export default function ExhibitorGrid() {
   const [inviteUsers, setInviteUsers] = useState<InviteCandidate[]>([])
   const [inviteLoading, setInviteLoading] = useState(false)
   const [inviteSending, setInviteSending] = useState<string | null>(null)
+    const [inviteSearch, setInviteSearch] = useState('')
 
   // Invitaciones pendientes en slots de esta semana (para mostrar ⏳ en celdas 1/2)
   const [slotPendingInvitations, setSlotPendingInvitations] = useState<
@@ -698,6 +699,7 @@ export default function ExhibitorGrid() {
   const handleOpenInviteModal = async (slotId: string) => {
     setInviteModalSlot(slotId)
     setInviteLoading(true)
+      setInviteSearch('')
 
     // IDs ya ocupados en este slot (tienen reserva activa → no pueden recibir otra)
     const slotRes = reservations.filter(
@@ -1386,10 +1388,13 @@ export default function ExhibitorGrid() {
                           <div className="rounded-lg px-2 py-1.5 text-xs bg-gray-100 text-gray-500 border border-gray-200">
                             <p className="font-semibold truncate text-[11px]">{reservation?.user?.name || 'Reservado'}</p>
                             <p className="text-[10px] text-gray-400">1/2 · pasado</p>
-                          </div>
-                        </td>
-                      )
-                    }
+                                                <p className="text-[9px] text-gray-400 mt-0.5 leading-none">
+                                                  {formatCompactTimeLabel(slot.start_time, slot.end_time)}
+                                                </p>
+                                              </div>
+                                            </td>
+                                          )
+                                        }
 
                     return (
                       <td key={dayNum} className="px-2 py-2 text-center">
@@ -1523,10 +1528,13 @@ export default function ExhibitorGrid() {
                               <span className="text-[10px] text-gray-400">1/2</span>
                             )}
                           </div>
-                        </div>
-                      </td>
-                    )
-                  }
+                                                      <p className="text-[9px] text-gray-400 mt-1 leading-none">
+                                                        {formatCompactTimeLabel(slot.start_time, slot.end_time)}
+                                                      </p>
+                                                    </div>
+                                                  </td>
+                                                )
+                                              }
 
                   // ── CELDA COMPLETA (2/2): Dos personas ──
                   // Si hay relevo abierto compatible, el borde cambia a ámbar para destacarlo
@@ -1540,10 +1548,13 @@ export default function ExhibitorGrid() {
                             <p className="font-semibold truncate text-[11px]">{pos2?.user?.name || 'Reservado'}</p>
                           </div>
                           <p className="text-[10px] text-gray-400 mt-0.5">✔ Completado</p>
-                        </div>
-                      </td>
-                    )
-                  }
+                                            <p className="text-[9px] text-gray-400 mt-0.5 leading-none">
+                                              {formatCompactTimeLabel(slot.start_time, slot.end_time)}
+                                            </p>
+                                          </div>
+                                        </td>
+                                      )
+                                    }
 
                   const hasOpenRelief = !hasOwnReservation && !!openReliefBySlot[slot.id]
                   return (
@@ -1722,9 +1733,12 @@ export default function ExhibitorGrid() {
                         )}
                         {/* Indicador completo */}
                         <p className="text-[10px] text-green-600 font-bold mt-0.5">2/2 ✓</p>
-                      </div>
-                    </td>
-                  )
+                                                <p className="text-[9px] text-gray-400 mt-0.5 leading-none">
+                                                  {formatCompactTimeLabel(slot.start_time, slot.end_time)}
+                                                </p>
+                                              </div>
+                                            </td>
+                                          )
                 })}
               </tr>
             ))}
@@ -1765,35 +1779,52 @@ export default function ExhibitorGrid() {
                   <span className="text-xs text-gray-400">(mismo género, sin turno en este slot)</span>
                 </p>
               ) : (
-                <ul className="divide-y divide-gray-100 max-h-72 overflow-y-auto">
-                  {inviteUsers.map(u => {
-                    const alreadySent = sentInvitations.some(
-                      i => i.slot_id === inviteModalSlot && i.to_user_id === u.id
-                    )
-                    return (
-                      <li key={u.id} className="flex items-start justify-between py-3 px-1">
-                        <div>
-                          <p className="text-sm font-medium text-gray-800">{u.name}</p>
-                          <p className="text-[11px] text-gray-500">{USER_TYPE_LABELS[u.user_type]}</p>
-                          {/* Sin validación de cupo: no hay avisos de conflicto */}
+                            <>
+                              {/* Buscador de compañeros */}
+                              <div className="relative mb-3">
+                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">🔍</span>
+                                <input
+                                  type="text"
+                                  placeholder="Buscar compañero..."
+                                  value={inviteSearch}
+                                  onChange={e => setInviteSearch(e.target.value)}
+                                  className="w-full pl-9 pr-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                                />
+                              </div>
+                              <ul className="divide-y divide-gray-100 max-h-72 overflow-y-auto">
+                                {inviteUsers
+                                  .filter(u =>
+                                    u.name.toLowerCase().includes(inviteSearch.trim().toLowerCase())
+                                  )
+                                  .map(u => {
+                                    const alreadySent = sentInvitations.some(
+                                      i => i.slot_id === inviteModalSlot && i.to_user_id === u.id
+                                    )
+                                    return (
+                                      <li key={u.id} className="flex items-start justify-between py-3 px-1">
+                                        <div>
+                                          <p className="text-sm font-medium text-gray-800">{u.name}</p>
+                                          <p className="text-[11px] text-gray-500">{USER_TYPE_LABELS[u.user_type]}</p>
+                                          {/* Sin validación de cupo: no hay avisos de conflicto */}
+                                        </div>
+                                        {alreadySent ? (
+                                          <span className="text-xs text-indigo-400 font-medium">✓ Enviada</span>
+                                        ) : (
+                                          <button
+                                            onClick={() => handleSendInvitation(u.id)}
+                                            disabled={inviteSending === u.id}
+                                            className="text-xs bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition"
+                                          >
+                                            {inviteSending === u.id ? '...' : 'Invitar'}
+                                          </button>
+                                        )}
+                                      </li>
+                                    )
+                                  })}
+                              </ul>
+                            </>
+                          )}
                         </div>
-                        {alreadySent ? (
-                          <span className="text-xs text-indigo-400 font-medium">✓ Enviada</span>
-                        ) : (
-                          <button
-                            onClick={() => handleSendInvitation(u.id)}
-                            disabled={inviteSending === u.id}
-                            className="text-xs bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition"
-                          >
-                            {inviteSending === u.id ? '...' : 'Invitar'}
-                          </button>
-                        )}
-                      </li>
-                    )
-                  })}
-                </ul>
-              )}
-            </div>
           </div>
         </div>
       )}

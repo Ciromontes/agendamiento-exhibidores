@@ -317,3 +317,21 @@ export function formatHour(time: string): string {
 export function formatTimeLabel(startTime: string, endTime: string): string {
   return `${formatHour(startTime)} - ${formatHour(endTime)}`
 }
+
+// ─── Helper: Etiqueta compacta de horario ────────────────────
+// Genera "6:00-8:00a.m" (o "6:00a.m-8:00p.m" si cambia el meridiano)
+// para mostrar el horario dentro de cada celda de la grilla.
+export function formatCompactTimeLabel(startTime: string, endTime: string): string {
+  const parse = (t: string) => {
+    const hour = parseInt(t.split(':')[0], 10)
+    const suffix = hour >= 12 ? 'p.m' : 'a.m'
+    const h = hour % 12 === 0 ? 12 : hour % 12
+    return { h, suffix }
+  }
+  const s = parse(startTime)
+  const e = parse(endTime)
+  if (s.suffix === e.suffix) {
+    return `${s.h}:00-${e.h}:00${s.suffix}`
+  }
+  return `${s.h}:00${s.suffix}-${e.h}:00${e.suffix}`
+}
