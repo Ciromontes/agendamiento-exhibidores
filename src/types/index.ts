@@ -44,13 +44,15 @@ export type User = {
   // publicador          → máx 1 turno/semana
   // precursor_regular   → máx 2 turnos/semana
   // precursor_auxiliar  → máx 6 turnos/mes (Fase 4)
-  gender: 'M' | 'F' | null    // Género: Masculino, Femenino, o sin definir
+  gender: 'M' | 'F' | null    // Género: Masculino o Femenino
   marital_status: string | null // Estado civil (opcional)
   phone: string | null         // Teléfono WhatsApp con código de país (ej: 573001234567)
   is_active: boolean           // Si puede acceder al sistema
   is_admin: boolean            // Si tiene privilegios de administrador
   is_super_admin: boolean      // V4: Super admin global (todas las congregaciones)
   spouse_id: string | null     // UUID del cónyuge vinculado (Fase 3)
+  family_id: string | null     // UUID del familiar vinculado (padre/hijo, etc.)
+  family_relation: FamilyRelation | null // Parentesco visto desde este usuario
   congregation_id: string      // V4: A qué congregación pertenece
   group_id: string | null      // V5: Grupo al que pertenece (opcional)
   created_at: string           // Fecha de creación (ISO string)
@@ -228,6 +230,19 @@ export const DEFAULT_TIME_BLOCKS = [
   { start: '14:00:00', end: '16:00:00', label: '2:00 - 4:00 PM' },
   { start: '16:00:00', end: '18:00:00', label: '4:00 - 6:00 PM' },
 ]
+
+// ─── Tipo: Parentesco familiar ───────────────────────────────
+// Lo asigna el admin al editar un usuario. Permite compartir
+// turno con esa persona aunque sea de distinto sexo.
+export type FamilyRelation = 'padre' | 'madre' | 'hijo' | 'hija' | 'otro'
+
+export const FAMILY_RELATION_LABELS: Record<FamilyRelation, string> = {
+  padre: 'Padre',
+  madre: 'Madre',
+  hijo: 'Hijo',
+  hija: 'Hija',
+  otro: 'Otra consanguinidad',
+}
 
 // ─── Constante: Etiquetas legibles de tipo de usuario ────────
 // Se muestra en el dashboard y panel de admin.
